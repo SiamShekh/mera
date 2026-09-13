@@ -2,7 +2,7 @@ import { WalletPanel } from '@/components/wallet/WalletPanel'
 
 function App() {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background px-6 py-16">
+    <main className="min-h-svh bg-background px-4 py-6 sm:px-6 sm:py-8">
       <WalletPanel />
     </main>
   )

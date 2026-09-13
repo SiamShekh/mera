@@ -9,6 +9,8 @@ export type Holding = {
   quantity: number
   /** USD price per 1 token */
   price: number
+  /** 24h price change percent (e.g. -2.38) */
+  priceChange24h: number | null
   /** Total value in USD (quantity × price) */
   value: number
   /** Same value expressed in SOL */

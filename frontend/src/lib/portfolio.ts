@@ -62,6 +62,7 @@ type JsonRpcResult<T> = {
 type DexPair = {
   liquidity?: { usd?: number }
   priceUsd?: string
+  priceChange?: { h24?: number }
   baseToken?: { address?: string; symbol?: string }
   quoteToken?: { address?: string; symbol?: string }
   info?: { imageUrl?: string }
@@ -69,6 +70,7 @@ type DexPair = {
 
 type TokenMarket = {
   priceUsd: number
+  priceChange24h: number | null
   icon: string | null
   symbol: string | null
 }
@@ -170,6 +172,7 @@ async function fetchTokenMarkets(
     if (lookupMints.includes(stable)) {
       markets[stable] = {
         priceUsd: 1,
+        priceChange24h: 0,
         icon: KNOWN_ICONS[stable] ?? null,
         symbol: KNOWN_ASSETS[stable] ?? null,
       }
@@ -210,6 +213,10 @@ async function fetchTokenMarkets(
 
       markets[mint] = {
         priceUsd,
+        priceChange24h:
+          typeof best.priceChange?.h24 === 'number'
+            ? best.priceChange.h24
+            : null,
         icon: best.info?.imageUrl ?? KNOWN_ICONS[mint] ?? null,
         symbol: best.baseToken?.symbol ?? KNOWN_ASSETS[mint] ?? null,
       }
@@ -229,6 +236,7 @@ async function fetchTokenMarkets(
     // Last-resort icon even without a price
     markets.native = {
       priceUsd: 0,
+      priceChange24h: null,
       icon: KNOWN_ICONS.native,
       symbol: 'SOL',
     }
@@ -290,6 +298,7 @@ export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
       asset: assetName(row.mint, market?.symbol ?? null),
       quantity: row.quantity,
       price,
+      priceChange24h: market?.priceChange24h ?? null,
       value,
       valueInSol,
       mint: row.mint,

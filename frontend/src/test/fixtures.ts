@@ -10,6 +10,7 @@ export function makeHolding(
     valueInSol: partial.valueInSol ?? 0,
     allocation: partial.allocation ?? 0,
     icon: partial.icon ?? null,
+    priceChange24h: partial.priceChange24h ?? null,
     ...partial,
   }
 }

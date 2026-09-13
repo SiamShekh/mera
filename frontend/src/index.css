@@ -8,6 +8,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -24,32 +25,41 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-positive: var(--positive);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-surface: var(--surface);
+  --color-lime: var(--lime);
+  --color-lime-foreground: var(--lime-foreground);
 }
 
 :root {
-  --radius: 0.5rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --radius: 0.9rem;
+  /* White Jupiter-like portfolio theme */
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #f6f6f6;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #111111;
+  --primary-foreground: #ffffff;
+  --secondary: #efefef;
+  --secondary-foreground: #111111;
+  --muted: #f3f3f3;
+  --muted-foreground: #737373;
+  --accent: #f3f3f3;
+  --accent-foreground: #111111;
+  --destructive: #e11d48;
+  --destructive-foreground: #ffffff;
+  --positive: #16a34a;
+  --border: #e8e8e8;
+  --input: #e8e8e8;
+  --ring: #c8f542;
+  --surface: #fafafa;
+  --lime: #c8f542;
+  --lime-foreground: #111111;
 }
 
 @layer base {
@@ -58,7 +68,7 @@
   }
 
   body {
-    @apply min-h-svh bg-background text-foreground antialiased;
+    @apply min-h-svh bg-background font-sans text-foreground antialiased;
     margin: 0;
   }
 

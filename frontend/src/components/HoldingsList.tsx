@@ -1,38 +1,22 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react'
 
-import { Button } from '@/components/ui/button'
 import { PortfolioInsights } from '@/components/PortfolioInsights'
+import { Button } from '@/components/ui/button'
+import { formatMoney, formatPercent, formatQty, formatSol } from '@/lib/format'
+import { WSOL_MINT } from '@/lib/portfolio'
+import { cn } from '@/lib/utils'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
+import type { Holding } from '@/types/holding'
 
 type HoldingsListProps = {
-  /** Connected wallet address */
   ownerAddress: string
-}
-
-function formatMoney(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '$0.00'
-  }
-  return value.toLocaleString(undefined, {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 2,
-  })
-}
-
-function formatQty(value: number) {
-  if (value >= 1000) {
-    return value.toLocaleString(undefined, { maximumFractionDigits: 2 })
-  }
-  return value.toLocaleString(undefined, { maximumFractionDigits: 6 })
-}
-
-function formatSol(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 SOL'
-  }
-  return `${value.toLocaleString(undefined, { maximumFractionDigits: 6 })} SOL`
+  /**
+   * positions = net worth + PnL + table
+   * spot = spot balances table only
+   */
+  mode?: 'positions' | 'spot'
 }
 
 function TokenIcon({ src, label }: { src: string | null; label: string }) {
@@ -41,7 +25,7 @@ function TokenIcon({ src, label }: { src: string | null; label: string }) {
   if (!src || broken) {
     return (
       <span
-        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-foreground"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold text-foreground"
         aria-hidden
       >
         {label.slice(0, 1)}
@@ -53,7 +37,7 @@ function TokenIcon({ src, label }: { src: string | null; label: string }) {
     <img
       src={src}
       alt=""
-      className="size-8 shrink-0 rounded-full bg-muted object-cover"
+      className="size-9 shrink-0 rounded-full bg-secondary object-cover"
       onError={() => {
         setBroken(true)
       }}
@@ -61,11 +45,18 @@ function TokenIcon({ src, label }: { src: string | null; label: string }) {
   )
 }
 
+function tradeUrl(holding: Holding) {
+  const mint = holding.mint === 'native' ? WSOL_MINT : holding.mint
+  return `https://jup.ag/swap/SOL-${mint}`
+}
+
 /**
- * Shows the connected wallet's holdings bucket:
- * icon, asset, quantity, USD price/value, SOL value, allocation %
+ * Jupiter-style holdings table on a white theme.
  */
-export function HoldingsList({ ownerAddress }: HoldingsListProps) {
+export function HoldingsList({
+  ownerAddress,
+  mode = 'positions',
+}: HoldingsListProps) {
   const dispatch = useAppDispatch()
   const { holdings, loading, error } = useAppSelector(
     (state) => state.portfolio,
@@ -75,79 +66,67 @@ export function HoldingsList({ ownerAddress }: HoldingsListProps) {
     void dispatch(loadPortfolio(ownerAddress))
   }, [dispatch, ownerAddress])
 
-  const totalValue = holdings.reduce((sum, row) => sum + row.value, 0)
-  const totalSol = holdings.reduce((sum, row) => sum + row.valueInSol, 0)
+  const totalValue = useMemo(
+    () => holdings.reduce((sum, row) => sum + row.value, 0),
+    [holdings],
+  )
+  const totalSol = useMemo(
+    () => holdings.reduce((sum, row) => sum + row.valueInSol, 0),
+    [holdings],
+  )
+
+  const showOverview = mode === 'positions'
 
   return (
-    <div className="w-full space-y-4 border-t border-border pt-6">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-medium text-foreground">Holdings</h2>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={loading}
-          onClick={() => {
-            void dispatch(loadPortfolio(ownerAddress))
-          }}
-        >
-          {loading ? 'Loading…' : 'Refresh'}
-        </Button>
-      </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-      {!loading && !error && holdings.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No tokens found.</p>
-      ) : null}
-
-      {holdings.length > 0 ? (
-        <div className="space-y-3">
-          <div className="space-y-1 text-sm">
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-muted-foreground">Total (USD)</span>
-              <span className="font-medium text-foreground">
-                {formatMoney(totalValue)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-4">
-              <span className="text-muted-foreground">Total (SOL)</span>
-              <span className="font-medium text-foreground">
-                {formatSol(totalSol)}
-              </span>
-            </div>
-          </div>
-
-          <ul className="space-y-3">
-            {holdings.map((row) => (
-              <li
-                key={row.mint}
-                className="space-y-1 border-b border-border pb-3 text-sm last:border-b-0 last:pb-0"
+    <div className="space-y-4">
+      {showOverview ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <section className="rounded-2xl bg-card p-5 sm:p-6">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <p className="text-sm text-muted-foreground">Net worth</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                disabled={loading}
+                onClick={() => {
+                  void dispatch(loadPortfolio(ownerAddress))
+                }}
+                aria-label="Refresh portfolio"
               >
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <TokenIcon src={row.icon} label={row.asset} />
-                    <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">
-                        {row.asset}
-                      </p>
-                      <p className="text-muted-foreground">
-                        {formatQty(row.quantity)} · {formatMoney(row.price)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <p className="font-medium text-foreground">
-                      {formatMoney(row.value)}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {formatSol(row.valueInSol)} · {row.allocation.toFixed(1)}%
-                    </p>
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
+                <RefreshCw
+                  className={cn('size-4', loading && 'animate-spin')}
+                />
+              </Button>
+            </div>
+
+            <p className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+              {loading && holdings.length === 0 ? '…' : formatMoney(totalValue)}
+            </p>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {formatSol(totalSol)}
+            </p>
+
+            <div className="mt-6 flex flex-wrap gap-2">
+              <Button type="button" className="rounded-xl" disabled>
+                <ArrowUpRight className="size-4" />
+                Send
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-xl"
+                disabled
+              >
+                <ArrowDownLeft className="size-4" />
+                Deposit
+              </Button>
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              Send / Deposit come next — wallet connect works now.
+            </p>
+          </section>
 
           <PortfolioInsights
             key={ownerAddress}
@@ -156,6 +135,138 @@ export function HoldingsList({ ownerAddress }: HoldingsListProps) {
           />
         </div>
       ) : null}
+
+      <section className="overflow-hidden rounded-2xl bg-card">
+        <div className="flex items-center justify-between gap-4 border-b border-border px-5 py-4 sm:px-6">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              {mode === 'spot' ? 'Spot balances' : 'Holdings'}
+            </h2>
+            <p className="text-sm text-muted-foreground">Wallet</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {!showOverview ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-8 rounded-xl"
+                disabled={loading}
+                onClick={() => {
+                  void dispatch(loadPortfolio(ownerAddress))
+                }}
+                aria-label="Refresh spot balances"
+              >
+                <RefreshCw
+                  className={cn('size-4', loading && 'animate-spin')}
+                />
+              </Button>
+            ) : null}
+            <p className="text-sm font-medium text-foreground">
+              {formatMoney(totalValue)}
+            </p>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="px-5 py-6 text-sm text-destructive sm:px-6">{error}</p>
+        ) : null}
+
+        {!loading && !error && holdings.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-muted-foreground sm:px-6">
+            No tokens found.
+          </p>
+        ) : null}
+
+        {holdings.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="px-5 py-3 font-medium sm:px-6">Asset</th>
+                  <th className="px-3 py-3 font-medium">Value / Balance</th>
+                  <th className="px-3 py-3 font-medium">Price / 24h</th>
+                  <th className="px-3 py-3 font-medium">Allocation</th>
+                  <th className="px-5 py-3 text-right font-medium sm:px-6">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {holdings.map((row) => {
+                  const change = row.priceChange24h
+                  const changePositive = (change ?? 0) > 0
+                  const changeNegative = (change ?? 0) < 0
+
+                  return (
+                    <tr
+                      key={row.mint}
+                      className="border-b border-border last:border-b-0"
+                    >
+                      <td className="px-5 py-4 sm:px-6">
+                        <div className="flex items-center gap-3">
+                          <TokenIcon src={row.icon} label={row.asset} />
+                          <div>
+                            <p className="font-semibold text-foreground">
+                              {row.asset}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {row.allocation.toFixed(1)}% of portfolio
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-4">
+                        <p className="font-semibold text-foreground">
+                          {formatMoney(row.value)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatQty(row.quantity)}
+                        </p>
+                      </td>
+                      <td className="px-3 py-4">
+                        <p className="font-semibold text-foreground">
+                          {formatMoney(row.price)}
+                        </p>
+                        <p
+                          className={cn(
+                            'text-xs font-medium',
+                            changePositive && 'text-positive',
+                            changeNegative && 'text-destructive',
+                            !changePositive &&
+                              !changeNegative &&
+                              'text-muted-foreground',
+                          )}
+                        >
+                          {formatPercent(change)}
+                        </p>
+                      </td>
+                      <td className="px-3 py-4">
+                        <p className="font-semibold text-foreground">
+                          {row.allocation.toFixed(1)}%
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatSol(row.valueInSol)}
+                        </p>
+                      </td>
+                      <td className="px-5 py-4 text-right sm:px-6">
+                        <a
+                          href={tradeUrl(row)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-9 items-center rounded-xl bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+                        >
+                          Trade
+                        </a>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </section>
     </div>
   )
 }

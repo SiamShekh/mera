@@ -4,47 +4,41 @@ import { Button } from '@/components/ui/button'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { checkBackendHealth } from '@/store/healthSlice'
 
-/**
- * Simple panel that calls GET /health on the backend via Redux Toolkit.
- */
+/** Small footer health check — kept quiet so it does not dominate the portfolio UI */
 export function BackendHealthPanel() {
   const dispatch = useAppDispatch()
   const { status, loading, error } = useAppSelector((state) => state.health)
 
-  // Call the backend once when this component first shows up
   useEffect(() => {
     void dispatch(checkBackendHealth())
   }, [dispatch])
 
   return (
-    <div className="w-full max-w-md space-y-4 border-t border-border pt-6">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-sm font-medium text-foreground">Backend API</h2>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={loading}
-          onClick={() => {
-            void dispatch(checkBackendHealth())
-          }}
-        >
-          {loading ? 'Checking…' : 'Retry'}
-        </Button>
-      </div>
-
-      <div className="flex items-center justify-between gap-4 text-sm">
-        <span className="text-muted-foreground">/health</span>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-muted-foreground">
+      <span>
+        Backend /health:{' '}
         <span className="font-medium text-foreground">
           {loading
-            ? 'Loading…'
+            ? 'Checking…'
             : error
               ? error
               : status
                 ? `status: ${status}`
-                : 'No response yet'}
+                : 'No response'}
         </span>
-      </div>
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-8 rounded-lg"
+        disabled={loading}
+        onClick={() => {
+          void dispatch(checkBackendHealth())
+        }}
+      >
+        Retry
+      </Button>
     </div>
   )
 }
