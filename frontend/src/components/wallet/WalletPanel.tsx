@@ -10,10 +10,9 @@ import { useClient, useRequest } from '@solana/react'
 import { useMemo } from 'react'
 
 import { BackendHealthPanel } from '@/components/BackendHealthPanel'
+import { HoldingsList } from '@/components/HoldingsList'
 import { Button } from '@/components/ui/button'
-import { NetworkSwitch } from '@/components/wallet/NetworkSwitch'
-import { LAMPORTS_PER_SOL } from '@/lib/config'
-import { useNetwork } from '@/hooks/useNetwork'
+import { LAMPORTS_PER_SOL, NETWORK_LABEL } from '@/lib/config'
 import type { AppClient } from '@/lib/solanaClient'
 
 function shortenAddress(value: string) {
@@ -28,7 +27,6 @@ function formatSol(lamports: bigint) {
 
 export function WalletPanel() {
   const client = useClient<AppClient>()
-  const { networkConfig } = useNetwork()
 
   const status = useWalletStatus(client)
   const wallets = useWallets(client)
@@ -76,7 +74,7 @@ export function WalletPanel() {
     <div className="flex w-full max-w-md flex-col items-center gap-8">
       <div className="text-center">
         <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
-          Solana · {networkConfig.label}
+          Solana · {NETWORK_LABEL}
         </p>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight text-foreground">
           Portfolio Manager
@@ -85,11 +83,6 @@ export function WalletPanel() {
           Connect your wallet to get started. Transfers and portfolio tools come
           next.
         </p>
-      </div>
-
-      {/* ON = Devnet, OFF = Mainnet — rebuilds the Kit client */}
-      <div className="w-full border-b border-border pb-6">
-        <NetworkSwitch />
       </div>
 
       {/* Connect / disconnect controls */}
@@ -130,9 +123,7 @@ export function WalletPanel() {
       <div className="w-full space-y-3 border-t border-border pt-6 text-sm">
         <div className="flex items-center justify-between gap-4">
           <span className="text-muted-foreground">Network</span>
-          <span className="font-medium text-foreground">
-            {networkConfig.label}
-          </span>
+          <span className="font-medium text-foreground">{NETWORK_LABEL}</span>
         </div>
         <div className="flex items-center justify-between gap-4">
           <span className="text-muted-foreground">Status</span>
@@ -154,6 +145,8 @@ export function WalletPanel() {
           </>
         ) : null}
       </div>
+
+      {owner ? <HoldingsList ownerAddress={owner} /> : null}
 
       <BackendHealthPanel />
     </div>

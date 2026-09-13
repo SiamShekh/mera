@@ -2,20 +2,17 @@ import { createClient } from '@solana/kit'
 import { solanaRpc } from '@solana/kit-plugin-rpc'
 import { walletSigner } from '@solana/kit-plugin-wallet'
 
-import { NETWORKS, type SolanaNetworkId } from '@/lib/config'
+import { SOLANA_CHAIN, SOLANA_RPC_URL } from '@/lib/config'
 
 /**
- * Build a Kit client for Devnet or Mainnet.
- * Call again when the user flips the network switch.
+ * One Solana Kit client for Mainnet.
+ * - walletSigner: browser wallets (Phantom, etc.) via Wallet Standard
+ * - solanaRpc: Mainnet RPC + sendTransaction helpers
  *
  * Docs: https://solana.com/docs/frontend/react-hooks
  */
-export function createSolanaClient(network: SolanaNetworkId) {
-  const config = NETWORKS[network]
+export const solanaClient = createClient()
+  .use(walletSigner({ chain: SOLANA_CHAIN }))
+  .use(solanaRpc({ rpcUrl: SOLANA_RPC_URL }))
 
-  return createClient()
-    .use(walletSigner({ chain: config.chain }))
-    .use(solanaRpc({ rpcUrl: config.rpcUrl }))
-}
-
-export type AppClient = ReturnType<typeof createSolanaClient>
+export type AppClient = typeof solanaClient

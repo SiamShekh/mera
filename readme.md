@@ -27,7 +27,7 @@ Traditional portfolios are either fully manual or locked into rigid bots. Progra
 
 ```
 hackathon/
-├── frontend/   # React + Vite app (Solana wallet connect on Devnet)
+├── frontend/   # React + Vite app (Solana wallet connect on Mainnet)
 └── backend/    # API & rule engine (coming soon)
 ```
 
@@ -36,8 +36,8 @@ hackathon/
 | Layer    | Tech |
 |----------|------|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, shadcn/ui |
-| Wallet   | Solana wallet-adapter (Phantom, Solflare) on **Devnet** |
-| Chain    | `@solana/web3.js` |
+| Wallet   | Solana Kit (`@solana/kit` + `@solana/react`) on **Mainnet** |
+| Chain    | `@solana/kit` |
 
 ## Getting started
 
@@ -49,10 +49,10 @@ npm install
 npm run dev
 ```
 
-Optional: set a custom RPC in `frontend/.env`:
+Optional: set a custom Mainnet RPC in `frontend/.env`:
 
 ```env
-VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
+VITE_SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
 ```
 
 ### Scripts
@@ -66,7 +66,7 @@ VITE_SOLANA_RPC_URL=https://api.devnet.solana.com
 
 ## Status
 
-Early hackathon build. Wallet connect on Solana Devnet is in place; natural-language rules, market monitoring, and automated portfolio updates are the next milestones.
+Early hackathon build. Wallet connect on Solana Mainnet is in place; natural-language rules, market monitoring, and automated portfolio updates are the next milestones.
 
 ## License
 

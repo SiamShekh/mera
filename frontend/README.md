@@ -1,6 +1,6 @@
 # Solana Portfolio Manager — Frontend
 
-Vite + React + TypeScript app with Tailwind CSS, shadcn/ui, ESLint, Prettier, and Solana Kit wallet connect on **Devnet**.
+Vite + React + TypeScript app with Tailwind CSS, shadcn/ui, ESLint, Prettier, and Solana Kit wallet connect on **Mainnet**.
 
 ## Setup
 
@@ -16,13 +16,13 @@ npm run dev
 - `npm run lint` — run ESLint
 - `npm run format` — format with Prettier
 - `npm run format:check` — check Prettier formatting
+- `npm run test` — unit tests (no RPC / no Helius calls)
 - `npm run preview` — preview production build
 
 ## Wallet / network
 
-- Toggle **Test network (Devnet)** ON = Devnet, OFF = Mainnet (saved in localStorage)
-- Default for development: **Devnet**
-- RPC overrides: `VITE_SOLANA_DEVNET_RPC_URL`, `VITE_SOLANA_MAINNET_RPC_URL`
+- Network: Solana **Mainnet** (`solana:mainnet`)
+- RPC: set `VITE_SOLANA_RPC_URL` in `.env` (your Helius Mainnet URL)
 - Stack: [`@solana/kit`](https://solana.com/docs/frontend/client) + [`@solana/react`](https://solana.com/docs/frontend/react-hooks) + wallet plugin
 - Connection enables future `client.sendTransaction` for portfolio actions — private keys stay in the wallet
 

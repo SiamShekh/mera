@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import { Provider } from 'react-redux'
 
 import App from './App.tsx'
-import { NetworkProvider } from '@/components/wallet/NetworkProvider'
 import { SolanaProvider } from '@/components/wallet/SolanaProvider'
 import { store } from '@/store/store'
 
@@ -13,11 +12,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {/* Provider makes the Redux store available to every component */}
     <Provider store={store}>
-      <NetworkProvider>
-        <SolanaProvider>
-          <App />
-        </SolanaProvider>
-      </NetworkProvider>
+      <SolanaProvider>
+        <App />
+      </SolanaProvider>
     </Provider>
   </StrictMode>,
 )

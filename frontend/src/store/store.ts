@@ -1,11 +1,13 @@
 import { configureStore } from '@reduxjs/toolkit'
 
 import healthReducer from '@/store/healthSlice'
+import portfolioReducer from '@/store/portfolioSlice'
 
 // One store for the whole app — add more slices here later
 export const store = configureStore({
   reducer: {
     health: healthReducer,
+    portfolio: portfolioReducer,
   },
 })
 
