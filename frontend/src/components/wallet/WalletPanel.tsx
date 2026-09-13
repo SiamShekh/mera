@@ -3,6 +3,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui'
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
 import { useEffect, useState } from 'react'
 
+import { BackendHealthPanel } from '@/components/BackendHealthPanel'
 import { NETWORK_LABEL } from '@/lib/solana'
 import { cn } from '@/lib/utils'
 
@@ -64,8 +65,8 @@ export function WalletPanel() {
           Portfolio Manager
         </h1>
         <p className="mt-3 text-base text-muted-foreground">
-          Connect your wallet to get started. Transfers and portfolio tools
-          come next.
+          Connect your wallet to get started. Transfers and portfolio tools come
+          next.
         </p>
       </div>
 
@@ -112,6 +113,8 @@ export function WalletPanel() {
           </>
         ) : null}
       </div>
+
+      <BackendHealthPanel />
     </div>
   )
 }

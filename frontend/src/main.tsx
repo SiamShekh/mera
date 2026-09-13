@@ -1,9 +1,11 @@
 import { Buffer } from 'buffer'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Provider } from 'react-redux'
 
 import App from './App.tsx'
 import { SolanaWalletProvider } from '@/components/wallet/SolanaWalletProvider'
+import { store } from '@/store/store'
 
 import './index.css'
 
@@ -12,8 +14,11 @@ import './index.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <SolanaWalletProvider>
-      <App />
-    </SolanaWalletProvider>
+    {/* Provider makes the Redux store available to every component */}
+    <Provider store={store}>
+      <SolanaWalletProvider>
+        <App />
+      </SolanaWalletProvider>
+    </Provider>
   </StrictMode>,
 )

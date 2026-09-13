@@ -1,4 +1,5 @@
 import js from '@eslint/js'
+import eslintConfigPrettier from 'eslint-config-prettier'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
@@ -13,4 +14,6 @@ export default defineConfig([
       globals: globals.node,
     },
   },
+  // Turn off ESLint rules that fight with Prettier
+  eslintConfigPrettier,
 ])
