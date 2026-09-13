@@ -14,7 +14,4 @@ export default defineConfig({
       '@': path.resolve(rootDir, './src'),
     },
   },
-  define: {
-    global: 'globalThis',
-  },
 })
