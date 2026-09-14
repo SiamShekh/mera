@@ -77,7 +77,7 @@ export type RulePreview = {
 export type CompileSuccess = {
   ok: true
   source: 'ai' | 'fallback'
-  provider?: 'openai' | 'workers_ai'
+  provider?: 'openai'
   rule: CompiledRule
   interpretation: string
   preview: RulePreview
@@ -120,10 +120,29 @@ export type ChatRequest = {
   walletConnected?: boolean
 }
 
+export type AutopilotTurnRequest = {
+  message: string
+  history?: ChatMessageTurn[]
+  holdings?: Array<{ symbol: string; quantity: number; priceUsd: number }>
+  walletConnected?: boolean
+  pendingRule?: CompiledRule | null
+}
+
+export type AutopilotTurnResult =
+  | {
+      ok: true
+      kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute'
+      reply: string
+      rule: CompiledRule | null
+      interpretation: string | null
+      provider: 'openai'
+    }
+  | { ok: false; error: string }
+
 export type ChatSuccess = {
   ok: true
   reply: string
-  provider: 'openai' | 'workers_ai'
+  provider: 'openai'
 }
 
 export type ChatFailure = {
@@ -201,7 +220,32 @@ export type KeeperTickResponse = {
     portfolioValueUsd?: number
     profitPercent?: number
   }>
+  executions?: Array<{
+    ruleId: string
+    asset: string
+    soldAmount: number
+    buyAmount: number
+    buySymbol: string
+    txid: string | null
+    note: string
+  }>
   skipped: number
   pricesUpdatedAt: string | null
   note: string
+}
+
+export type ArmAutopilotResponse = {
+  armed: boolean
+  settledNow: boolean
+  reason: string
+  execution: {
+    ruleId: string
+    asset: string
+    soldAmount: number
+    buyAmount: number
+    buySymbol: string
+    txid: string | null
+    note: string
+  } | null
+  rule: Rule
 }

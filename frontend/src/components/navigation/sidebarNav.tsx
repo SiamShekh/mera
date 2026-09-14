@@ -98,13 +98,6 @@ const SIDEBAR_SECTIONS: ReadonlyArray<{
         enabled: true,
       },
       {
-        kind: 'link',
-        to: '/vault',
-        label: 'Autopilot',
-        icon: Zap,
-        enabled: true,
-      },
-      {
         kind: 'action',
         action: 'mera-ai',
         label: 'AI Chat',
@@ -137,10 +130,10 @@ type SidebarNavProps = {
 
 /**
  * Shared Trade / Earn / Manage links for desktop sidebar + mobile drawer.
- * AI Chat opens the Mera slide-over (not a separate page).
+ * AI Chat appears only while the panel is closed (reopen entry).
  */
 export function SidebarNav({ onNavigate, className }: SidebarNavProps) {
-  const { openChat } = useMeraAi()
+  const { open, openChat } = useMeraAi()
 
   return (
     <nav className={cn('flex flex-col gap-5', className)}>
@@ -164,6 +157,10 @@ export function SidebarNav({ onNavigate, className }: SidebarNavProps) {
               }
 
               if (item.kind === 'action') {
+                // Only show AI Chat when the panel is closed — reopen entry point.
+                if (open) {
+                  return null
+                }
                 return (
                   <li key={item.label}>
                     <button

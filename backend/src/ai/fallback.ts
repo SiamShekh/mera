@@ -29,6 +29,12 @@ export function fallbackCompile(
     )
   }
 
+  const absolutePrice = tryAbsolutePriceSell(text, lower)
+  if (absolutePrice) return absolutePrice
+
+  const marketSell = tryMarketSell(text, lower)
+  if (marketSell) return marketSell
+
   const takeProfit = tryTakeProfit(text, lower)
   if (takeProfit) return takeProfit
 
@@ -40,8 +46,140 @@ export function fallbackCompile(
 
   return rejection(
     'unsupported',
-    'Could not compile that into a supported rule. Try something like “NVDA never above 40%” or “keep at least $100 USDC”.',
+    'Could not compile that into a supported rule. Try something like “sell 50% of NVIDIA above $100”, “sell 50% of my NVDAx”, or “keep at least $100 USDC”.',
   )
+}
+
+/**
+ * Market sell now: "Sell 50% of my NVIDIA" / "sell all my NVIDIA at the current price"
+ * Encoded as take_profit unit=amount value=0 (always triggered).
+ */
+function tryMarketSell(
+  text: string,
+  lower: string,
+): CompiledRule | CompiledRuleRejection | null {
+  // Deferred limit/TP (not "at the current/market price")
+  const hasDeferredTrigger =
+    /(above|over|reaches|hits|goes above|at or above)\s*\$?\s*\d/i.test(text) ||
+    /(when|if).*(up|profit|gain)\s*\d/i.test(text) ||
+    /(when|if).*(price|\$).*(above|over|reaches|hits)/i.test(text)
+  if (hasDeferredTrigger) return null
+
+  const looksLikeSell = /\bsell\b/i.test(text)
+  if (!looksLikeSell) return null
+
+  const actionValue = extractSellSizePercent(lower)
+  if (actionValue === null) return null
+  if (!(actionValue > 0) || actionValue > 100) {
+    return rejection(
+      'invalid_percent',
+      'Sell size percent must be between 0 and 100.',
+    )
+  }
+
+  let asset = extractAsset(text)
+  if (!asset && /(coin|token|stock|holding)/i.test(text)) {
+    asset = normalizeAsset('NVDAx')
+  }
+  if (!asset) {
+    return rejection(
+      'missing_details',
+      'Name the asset to sell (e.g. NVIDIA / NVDAx).',
+    )
+  }
+
+  return {
+    type: 'take_profit',
+    asset,
+    unit: 'amount',
+    value: 0,
+    actionUnit: 'percent',
+    actionValue,
+    sellBasis: 'position',
+  }
+}
+
+/** 50% / all / entire / everything → sell size percent. */
+function extractSellSizePercent(lower: string): number | null {
+  if (
+    /(sell\s+)?(all|everything|the\s+entire|my\s+entire|the\s+whole|my\s+whole)\b/.test(
+      lower,
+    ) ||
+    /\b100\s*%/.test(lower)
+  ) {
+    return 100
+  }
+
+  const sellPctMatch =
+    lower.match(/sell\s+(\d+(?:\.\d+)?)\s*%/) ??
+    lower.match(/(\d+(?:\.\d+)?)\s*%\s*(of\s+)?(my\s+)?/)
+  if (!sellPctMatch) return null
+  return Number(sellPctMatch[1])
+}
+
+/**
+ * Absolute USD price trigger: "Sell 50% of NVIDIA when the price goes above $100."
+ * Encoded as take_profit with unit=amount (price USD) + action sell size.
+ */
+function tryAbsolutePriceSell(
+  text: string,
+  lower: string,
+): CompiledRule | CompiledRuleRejection | null {
+  const looksLikePriceTrigger =
+    /(sell).*(when|if).*(price|\$)?[^\n.]{0,40}(above|over|reaches|hits|goes above|at or above)/i.test(
+      text,
+    ) ||
+    /(when|if).*(price|\$)?[^\n.]{0,40}(above|over|reaches|hits).{0,40}(sell)/i.test(
+      text,
+    )
+  if (!looksLikePriceTrigger) return null
+
+  const actionValue = extractSellSizePercent(lower)
+  const priceMatch =
+    lower.match(
+      /(?:above|over|reaches|hits|goes above|at or above)\s*\$?\s*(\d+(?:\.\d+)?)/,
+    ) ?? lower.match(/\$\s*(\d+(?:\.\d+)?)/)
+
+  const asset = extractAsset(text)
+  if (!asset) {
+    return rejection(
+      'missing_details',
+      'Name the asset for this price trigger (e.g. NVIDIA / NVDAx).',
+    )
+  }
+  if (actionValue === null) {
+    return rejection(
+      'missing_details',
+      'Say how much to sell (e.g. “sell 50% …” or “sell all … when price goes above $100”).',
+    )
+  }
+  if (!priceMatch) {
+    return rejection(
+      'missing_details',
+      'Include the USD price trigger (e.g. “above $100”).',
+    )
+  }
+
+  const value = Number(priceMatch[1])
+  if (!(actionValue > 0) || actionValue > 100) {
+    return rejection(
+      'invalid_percent',
+      'Sell size percent must be between 0 and 100.',
+    )
+  }
+  if (!(value > 0)) {
+    return rejection('missing_details', 'Price trigger must be greater than 0.')
+  }
+
+  return {
+    type: 'take_profit',
+    asset,
+    unit: 'amount',
+    value,
+    actionUnit: 'percent',
+    actionValue,
+    sellBasis: 'position',
+  }
 }
 
 function tryMaxAllocation(
@@ -230,11 +368,37 @@ function extractAsset(text: string): string | null {
     'up',
     'in',
     'profit',
+    'want',
+    'to',
+    'i',
+    'a',
+    'an',
+    'coin',
+    'coins',
+    'token',
+    'tokens',
+    'stock',
+    'stocks',
+    'price',
+    'goes',
+    'above',
+    'below',
+    'over',
+    'under',
+    'when',
+    'and',
+    'or',
+    'all',
+    'everything',
+    'entire',
+    'whole',
+    'current',
   ])
 
   const tokens = text.match(/[A-Za-z][A-Za-z0-9._-]*/g) ?? []
   for (const token of tokens) {
     if (stop.has(token.toLowerCase())) continue
+    if (token.length < 2) continue
     const normalized = normalizeAsset(token)
     if (normalized) return normalized
   }

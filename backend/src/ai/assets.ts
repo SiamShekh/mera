@@ -20,7 +20,21 @@ export const ASSET_ALIASES: AssetAlias[] = [
   { symbol: 'BTC', aliases: ['bitcoin', 'btc', 'wbtc'] },
   { symbol: 'ETH', aliases: ['ethereum', 'eth', 'weth'] },
   { symbol: 'JUP', aliases: ['jupiter', 'jup'] },
-  { symbol: 'NVDA', aliases: ['nvidia', 'nvda', 'nvdia'] },
+  {
+    symbol: 'NVDAx',
+    aliases: [
+      'nvidia',
+      'nvda',
+      'nvdax',
+      'nvdia',
+      'navidia',
+      'nvidia stock',
+      'nvidia xstock',
+      'nvidia x stock',
+    ],
+  },
+  { symbol: 'SOLx', aliases: ['solx', 'sol stock', 'tokenized sol'] },
+  { symbol: 'stX', aliases: ['stx', 'stock x'] },
 ]
 
 const TICKER_RE = /^[A-Za-z][A-Za-z0-9._-]{0,31}$/

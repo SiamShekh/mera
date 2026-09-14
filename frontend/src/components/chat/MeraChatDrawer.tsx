@@ -15,8 +15,17 @@ import { ChatMarkdown } from '@/components/chat/ChatMarkdown'
 import { Button } from '@/components/ui/button'
 import type { AppClient } from '@/lib/solanaClient'
 import { cn } from '@/lib/utils'
-import { useChatMutation } from '@/store/api'
-import { useAppSelector } from '@/store/hooks'
+import {
+  useArmAutopilotMutation,
+  useAutopilotTurnMutation,
+  useConfirmRuleMutation,
+  useSwapConfigQuery,
+} from '@/store/api'
+import { useAppDispatch, useAppSelector } from '@/store/hooks'
+import { loadPortfolio } from '@/store/portfolioSlice'
+import { sendHoldingTransfer } from '@/lib/sendTransfer'
+import type { CompiledRule } from '@/types/api'
+import type { Holding } from '@/types/holding'
 
 type DrawerView = 'chat' | 'history' | 'settings'
 type Role = 'user' | 'assistant'
@@ -36,8 +45,14 @@ type Thread = {
 
 const STARTERS = [
   'How does Autopilot work?',
-  'What’s my biggest risk?',
-  'Draft a max 40% SOL rule',
+  'Sell all of my NVIDIA at the current price',
+  'Sell 50% of NVIDIA above $100',
+] as const
+
+const AUTOPILOT_STARTERS = [
+  'Sell all of my NVIDIA stock at the current price.',
+  'Sell 50% of my NVIDIA stocks when the price goes above $100.',
+  'When NVDAx is up 20%, sell 10%',
 ] as const
 
 let seq = 0
@@ -46,15 +61,111 @@ function nextId(prefix: string) {
   return `${prefix}-${seq}`
 }
 
+function looksLikeDeployIntent(text: string) {
+  return /deploy.*(pda|pdr|portfolio|vault)|initialize[_\s-]?portfolio|link.*(vault|pda|pdr)/i.test(
+    text,
+  )
+}
+
+function formatChatError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    const record = err as {
+      data?: { error?: string; message?: string }
+      error?: string | { status?: number; data?: { error?: string } }
+      message?: string
+      status?: number
+    }
+    const fromData =
+      record.data?.error ??
+      record.data?.message ??
+      (typeof record.error === 'object' ? record.error?.data?.error : null) ??
+      (typeof record.error === 'string' ? record.error : null)
+    if (fromData && String(fromData).trim()) {
+      return String(fromData)
+    }
+    if (record.message && String(record.message).trim()) {
+      return String(record.message)
+    }
+  }
+  if (err instanceof Error && err.message) {
+    return err.message
+  }
+  return 'Something went wrong while arming Autopilot. Check the backend terminal for details.'
+}
+
+function normalizeHoldingSymbol(raw: string): string {
+  const upper = raw
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+  if (
+    upper === 'NVDA' ||
+    upper === 'NVDAX' ||
+    upper.includes('NVIDIA') ||
+    upper === 'NAVIDIA'
+  ) {
+    return 'NVDAX'
+  }
+  return upper
+}
+
+function findSellHolding(holdings: Holding[], asset: string): Holding | null {
+  const want = normalizeHoldingSymbol(asset)
+  return (
+    holdings.find((row) => normalizeHoldingSymbol(row.asset) === want) ?? null
+  )
+}
+
+function computeSellUiAmount(
+  holding: Holding,
+  rule: {
+    actionUnit: string
+    actionValue: number
+    sellBasis: string
+  },
+): { uiAmount: string; uiNumber: number } {
+  const decimals = Math.min(Math.max(holding.decimals, 0), 9)
+  const scale = 10 ** decimals
+  const balanceRaw = Math.floor(holding.quantity * scale + 1e-9)
+
+  let sellRaw: number
+  if (rule.actionUnit === 'amount') {
+    const price = holding.price > 0 ? holding.price : 0
+    if (!(price > 0)) {
+      return { uiAmount: '0', uiNumber: 0 }
+    }
+    const fromUsd = Math.floor((rule.actionValue / price) * scale + 1e-9)
+    sellRaw = Math.min(balanceRaw, fromUsd)
+  } else {
+    // Integer percent of raw balance — avoids arm/verify float off-by-one.
+    sellRaw = Math.floor((balanceRaw * rule.actionValue) / 100)
+  }
+
+  if (sellRaw <= 0) {
+    return { uiAmount: '0', uiNumber: 0 }
+  }
+
+  const uiNumber = sellRaw / scale
+  const exact = uiNumber.toFixed(decimals)
+  return { uiAmount: exact, uiNumber: Number(exact) }
+}
+
 /**
- * Mera AI slide-over — same white theme as wallet connect / details.
+ * Mera AI chat as part of the app shell:
+ * - Desktop: right layout column that shrinks main content when open
+ * - Mobile: full-screen page when open
+ * Reopen from the sidebar "AI Chat" item after closing.
  */
 export function MeraChatDrawer() {
-  const { open, closeChat } = useMeraAi()
+  const { open, closeChat, intent, consumeDraftPrefill } = useMeraAi()
   const client = useClient<AppClient>()
   const connected = useConnectedWallet(client)
+  const dispatch = useAppDispatch()
   const holdings = useAppSelector((state) => state.portfolio.holdings)
-  const [chat] = useChatMutation()
+  const [autopilotTurn] = useAutopilotTurnMutation()
+  const [confirmRule] = useConfirmRuleMutation()
+  const [armAutopilot] = useArmAutopilotMutation()
+  const { data: swapConfig } = useSwapConfigQuery()
   const [view, setView] = useState<DrawerView>('chat')
   const [threads, setThreads] = useState<Thread[]>([
     {
@@ -67,10 +178,39 @@ export function MeraChatDrawer() {
   const [activeId, setActiveId] = useState('t-welcome')
   const [draft, setDraft] = useState('')
   const [typing, setTyping] = useState(false)
+  const [pendingRule, setPendingRule] = useState<CompiledRule | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const active = threads.find((t) => t.id === activeId) ?? threads[0]
+  const starterPrompts = intent === 'autopilot' ? AUTOPILOT_STARTERS : STARTERS
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const prefill = consumeDraftPrefill()
+    if (!prefill) {
+      return
+    }
+    // Defer so we don't setState synchronously inside the effect body.
+    const id = window.setTimeout(() => {
+      setDraft(prefill)
+      inputRef.current?.focus()
+    }, 0)
+    return () => {
+      window.clearTimeout(id)
+    }
+  }, [open, consumeDraftPrefill])
+
+  // Autopilot balance checks need live chain holdings — refresh when chat opens.
+  useEffect(() => {
+    const owner = connected?.account.address
+    if (!open || !owner) {
+      return
+    }
+    void dispatch(loadPortfolio(owner))
+  }, [open, connected?.account.address, dispatch])
 
   useEffect(() => {
     if (!open) {
@@ -91,14 +231,20 @@ export function MeraChatDrawer() {
     }
   }, [open, closeChat, view])
 
+  // Mobile full-screen only — desktop chat is a layout column, so page can scroll.
   useEffect(() => {
     if (!open) {
       return
     }
-    const previous = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
+    const mq = window.matchMedia('(max-width: 1023px)')
+    const apply = () => {
+      document.body.style.overflow = mq.matches ? 'hidden' : ''
+    }
+    apply()
+    mq.addEventListener('change', apply)
     return () => {
-      document.body.style.overflow = previous
+      mq.removeEventListener('change', apply)
+      document.body.style.overflow = ''
     }
   }, [open])
 
@@ -122,6 +268,7 @@ export function MeraChatDrawer() {
     setActiveId(id)
     setView('chat')
     setDraft('')
+    setPendingRule(null)
     window.setTimeout(() => {
       inputRef.current?.focus()
     }, 50)
@@ -147,6 +294,172 @@ export function MeraChatDrawer() {
     )
   }
 
+  async function armAndSettle(
+    threadId: string,
+    owner: string,
+    rule: CompiledRule,
+    prompt: string,
+    interpretation: string | null,
+  ) {
+    const signer = connected?.signer
+    const treasury = swapConfig?.treasury
+
+    if (!signer) {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content:
+          'I understand the order, but I need a connected wallet to approve the escrow. Connect a Devnet wallet and reply **yes** again.',
+      })
+      return
+    }
+    if (!treasury) {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content:
+          'I can’t arm Autopilot yet — the swap treasury isn’t configured on the backend (SWAP_AUTHORITY_SECRET + mock mints).',
+      })
+      return
+    }
+
+    if (rule.type !== 'take_profit') {
+      await confirmRule({
+        userAddress: owner,
+        prompt,
+        rule,
+        status: 'active',
+      }).unwrap()
+      setPendingRule(null)
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content: [
+          '**Autopilot rule activated**',
+          '',
+          interpretation ??
+            'Allocation rule is live and watched in the background.',
+        ].join('\n'),
+      })
+      return
+    }
+
+    // Always re-read the wallet before claiming "no balance".
+    let liveHoldings = holdings
+    try {
+      const loaded = await dispatch(loadPortfolio(owner)).unwrap()
+      liveHoldings = loaded.holdings
+    } catch {
+      // Fall back to whatever Redux already has
+    }
+
+    const holding = findSellHolding(liveHoldings, rule.asset)
+    if (!holding || holding.quantity <= 0) {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content: [
+          `I still can’t see **${rule.asset}** in the connected Devnet wallet.`,
+          '',
+          liveHoldings.length === 0
+            ? 'Holdings didn’t load from RPC — open **Spot**, confirm your wallet is on Devnet, then reply **yes** again.'
+            : `I see: ${liveHoldings.map((row) => `${row.asset} ${row.quantity}`).join(', ') || 'nothing'}. If NVDAx is missing, use **Faucet** on Spot, then reply **yes**.`,
+        ].join('\n'),
+      })
+      return
+    }
+    if (!holding.tokenProgram || holding.mint === 'native') {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content:
+          'Autopilot sells need an SPL mock stock (e.g. NVDAx), not native SOL.',
+      })
+      return
+    }
+
+    const sized = computeSellUiAmount(holding, rule)
+    if (!(sized.uiNumber > 0)) {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content:
+          'I couldn’t size that sell from your balance. Check the amount and try again.',
+      })
+      return
+    }
+
+    appendMessage(threadId, {
+      id: nextId('a'),
+      role: 'assistant',
+      content: `Approve in your wallet to lock **${sized.uiNumber} ${holding.asset}** for Autopilot.`,
+    })
+
+    try {
+      const depositSignature = await sendHoldingTransfer({
+        client,
+        signer,
+        holding,
+        recipient: treasury,
+        uiAmount: sized.uiAmount,
+      })
+
+      const confirmed = await confirmRule({
+        userAddress: owner,
+        prompt,
+        rule,
+        status: 'active',
+      }).unwrap()
+
+      const armed = await armAutopilot({
+        ruleId: confirmed.rule.id,
+        userAddress: owner,
+        sellMint: holding.mint,
+        sellAmount: sized.uiNumber,
+        depositSignature,
+      }).unwrap()
+
+      void dispatch(loadPortfolio(owner))
+      setPendingRule(null)
+
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content: armed.settledNow
+          ? [
+              '**Done — Autopilot sold**',
+              '',
+              interpretation ?? confirmed.interpretation,
+              '',
+              armed.execution?.note ?? armed.reason,
+              armed.execution?.txid ? `Tx: \`${armed.execution.txid}\`` : null,
+            ]
+              .filter(Boolean)
+              .join('\n')
+          : [
+              '**Autopilot armed**',
+              '',
+              interpretation ?? confirmed.interpretation,
+              '',
+              `Escrow locked. ${armed.reason}`,
+              'No Force tick / keeper clicks needed — it sells when the condition hits.',
+            ].join('\n'),
+      })
+    } catch (err) {
+      appendMessage(threadId, {
+        id: nextId('a'),
+        role: 'assistant',
+        content: [
+          '**Wallet approval or arming failed**',
+          '',
+          formatChatError(err),
+          '',
+          'If you already signed a deposit, your tokens may be in treasury — reply **yes** again only after checking Spot balances, or ask me to retry.',
+        ].join('\n'),
+      })
+    }
+  }
+
   async function sendMessage(text: string) {
     const content = text.trim()
     if (!content || typing || !active) {
@@ -157,6 +470,7 @@ export function MeraChatDrawer() {
       role: message.role,
       content: message.content,
     }))
+    const owner = connected?.account.address
 
     appendMessage(threadId, {
       id: nextId('u'),
@@ -167,26 +481,123 @@ export function MeraChatDrawer() {
     setTyping(true)
 
     try {
-      const result = await chat({
+      if (looksLikeDeployIntent(content)) {
+        appendMessage(threadId, {
+          id: nextId('a'),
+          role: 'assistant',
+          content: [
+            'Deploying / linking the **Portfolio PDA** isn’t an Autopilot sell rule.',
+            '',
+            'For sells, just tell me what to sell in plain English and I’ll confirm with you first.',
+          ].join('\n'),
+        })
+        return
+      }
+
+      // Stale/empty Redux holdings caused false "no balance" — refresh from chain first.
+      let liveHoldings = holdings
+      if (owner) {
+        try {
+          const loaded = await dispatch(loadPortfolio(owner)).unwrap()
+          liveHoldings = loaded.holdings
+        } catch {
+          // Keep last known holdings if RPC fails
+        }
+      }
+
+      const result = await autopilotTurn({
         message: content,
         history,
-        holdings: holdings.map((row) => row.asset).filter(Boolean),
+        holdings: liveHoldings.map((row) => ({
+          symbol: row.asset,
+          quantity: row.quantity,
+          priceUsd: row.price,
+        })),
         walletConnected: Boolean(connected),
+        pendingRule,
       }).unwrap()
+
+      if (!result.ok) {
+        appendMessage(threadId, {
+          id: nextId('a'),
+          role: 'assistant',
+          content: `I couldn’t reach Autopilot AI right now. ${result.error}`,
+        })
+        return
+      }
+
+      if (result.kind === 'propose' && result.rule) {
+        setPendingRule(result.rule)
+        appendMessage(threadId, {
+          id: nextId('a'),
+          role: 'assistant',
+          content: [
+            result.reply,
+            '',
+            result.interpretation
+              ? `**Order draft:** ${result.interpretation}`
+              : null,
+            '',
+            'Reply **yes** to confirm, or tell me what to change.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        })
+        return
+      }
+
+      if (
+        result.kind === 'clarify' ||
+        result.kind === 'cannot' ||
+        result.kind === 'chat'
+      ) {
+        if (result.kind === 'clarify' || result.kind === 'cannot') {
+          // Keep pending only if still relevant; clear on cannot
+          if (result.kind === 'cannot') setPendingRule(null)
+        }
+        appendMessage(threadId, {
+          id: nextId('a'),
+          role: 'assistant',
+          content: result.reply,
+        })
+        return
+      }
+
+      if (result.kind === 'execute' && result.rule) {
+        if (!owner) {
+          setPendingRule(result.rule)
+          appendMessage(threadId, {
+            id: nextId('a'),
+            role: 'assistant',
+            content:
+              'Order is ready, but you need a connected Devnet wallet. Connect, then reply **yes**.',
+          })
+          return
+        }
+        await armAndSettle(
+          threadId,
+          owner,
+          result.rule,
+          content,
+          result.interpretation,
+        )
+        return
+      }
 
       appendMessage(threadId, {
         id: nextId('a'),
         role: 'assistant',
-        content: result.ok
-          ? result.reply
-          : `I couldn’t reach the AI right now. ${result.error}`,
+        content: result.reply,
       })
-    } catch {
+    } catch (err) {
       appendMessage(threadId, {
         id: nextId('a'),
         role: 'assistant',
-        content:
-          'I couldn’t reach Mera AI. Keep the backend running with `wrangler login` so Workers AI works (or set OPENAI_API_KEY as a fallback).',
+        content: [
+          'I couldn’t finish that Autopilot turn.',
+          '',
+          formatChatError(err),
+        ].join('\n'),
       })
     } finally {
       setTyping(false)
@@ -212,20 +623,16 @@ export function MeraChatDrawer() {
         : 'Mera AI'
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        type="button"
-        className="absolute inset-0 cursor-pointer bg-black/40"
-        aria-label="Close Mera AI"
-        onClick={closeChat}
-      />
-
-      <aside
-        className="relative flex h-full w-full max-w-md flex-col bg-background text-foreground shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Mera AI"
-      >
+    <aside
+      className={cn(
+        'flex flex-col bg-background text-foreground',
+        // Mobile: full-screen page over the shell
+        'fixed inset-0 z-50',
+        // Desktop: layout column — shrinks main content (not an overlay)
+        'lg:relative lg:inset-auto lg:z-auto lg:h-svh lg:w-[22.5rem] lg:shrink-0 lg:border-l lg:border-border',
+      )}
+      aria-label="Mera AI"
+    >
         <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
           <div className="flex min-w-0 items-center gap-2">
             {view !== 'chat' ? (
@@ -349,9 +756,9 @@ export function MeraChatDrawer() {
                 About Mera AI
               </p>
               <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-                Product assistant for this hackathon build — portfolio,
-                Autopilot, rules, Deposit, and Send. It stays on Mera topics and
-                refuses unrelated requests.
+                Autopilot brain: understands natural language, asks if unclear,
+                confirms with you, then arms the sell. Uses OpenAI when
+                configured.
               </p>
             </section>
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3">
@@ -376,13 +783,14 @@ export function MeraChatDrawer() {
                     <Sparkles className="size-5 text-foreground" />
                   </div>
                   <p className="text-base font-semibold text-foreground">
-                    Ask Mera anything
+                    Talk to Autopilot
                   </p>
                   <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
-                    About your portfolio, vault, or next move.
+                    Say what you want in plain English. I’ll clarify, then ask
+                    you to confirm before doing anything.
                   </p>
                   <div className="mt-5 flex w-full flex-col gap-2">
-                    {STARTERS.map((prompt) => (
+                    {starterPrompts.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
@@ -479,6 +887,5 @@ export function MeraChatDrawer() {
           </>
         ) : null}
       </aside>
-    </div>
   )
 }

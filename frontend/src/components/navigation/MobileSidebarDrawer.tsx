@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
 import {
@@ -50,7 +51,7 @@ export function MobileSidebarDrawer({
     return null
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex lg:hidden">
       <button
         type="button"
@@ -88,6 +89,7 @@ export function MobileSidebarDrawer({
           <SidebarHelpButton />
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -6,7 +6,8 @@ export const keeperTickBodySchema = z.object({
     .trim()
     .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
     .optional(),
-  dryRun: z.boolean().optional().default(true),
+  /** Default false — Autopilot executes sells when conditions hit. */
+  dryRun: z.boolean().optional().default(false),
 })
 
 export const linkPortfolioBodySchema = z.object({
@@ -37,6 +38,22 @@ export const linkRuleBodySchema = z.object({
   onChainRuleId: z.number().int().positive(),
 })
 
+/** Chat-time arm: user already deposited sell tokens to treasury. */
+export const armAutopilotBodySchema = z.object({
+  ruleId: z.string().uuid(),
+  userAddress: z
+    .string()
+    .trim()
+    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  sellMint: z
+    .string()
+    .trim()
+    .regex(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/),
+  sellAmount: z.number().positive(),
+  depositSignature: z.string().trim().min(32).max(128),
+})
+
 export type KeeperTickBody = z.infer<typeof keeperTickBodySchema>
 export type LinkPortfolioBody = z.infer<typeof linkPortfolioBodySchema>
 export type LinkRuleBody = z.infer<typeof linkRuleBodySchema>
+export type ArmAutopilotBody = z.infer<typeof armAutopilotBodySchema>

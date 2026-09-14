@@ -2,6 +2,9 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 
 import { API_URL } from '@/lib/config'
 import type {
+  ArmAutopilotResponse,
+  AutopilotTurnRequest,
+  AutopilotTurnResult,
   ChatRequest,
   ChatResult,
   CompiledRule,
@@ -112,6 +115,15 @@ export const api = createApi({
       }),
     }),
 
+    /** Conversational Autopilot brain (clarify → propose → confirm). */
+    autopilotTurn: builder.mutation<AutopilotTurnResult, AutopilotTurnRequest>({
+      query: (body) => ({
+        url: '/ai/autopilot',
+        method: 'POST',
+        body,
+      }),
+    }),
+
     swapConfig: builder.query<SwapConfigResponse, void>({
       query: () => ({ url: '/swap/config' }),
     }),
@@ -153,6 +165,26 @@ export const api = createApi({
         method: 'POST',
         body,
       }),
+      invalidatesTags: ['Rules'],
+    }),
+
+    /** Attach escrow deposit so Autopilot can settle without further clicks. */
+    armAutopilot: builder.mutation<
+      ArmAutopilotResponse,
+      {
+        ruleId: string
+        userAddress: string
+        sellMint: string
+        sellAmount: number
+        depositSignature: string
+      }
+    >({
+      query: (body) => ({
+        url: '/keeper/arm',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Rules'],
     }),
   }),
 })
@@ -166,10 +198,12 @@ export const {
   useValidateCompiledRuleMutation,
   useConfirmRuleMutation,
   useChatMutation,
+  useAutopilotTurnMutation,
   useSwapConfigQuery,
   useCompleteSwapMutation,
   useSwapFaucetMutation,
   useGetPricesQuery,
   useTickPricesMutation,
   useKeeperTickMutation,
+  useArmAutopilotMutation,
 } = api

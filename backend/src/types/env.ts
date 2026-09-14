@@ -2,14 +2,10 @@ export type Bindings = {
   DB: D1Database
   ENVIRONMENT: string
   CORS_ORIGIN: string
-  /** Optional OpenAI key (wrangler secret / .dev.vars). Fallback only. */
+  /** OpenAI API key (required for Autopilot / chat). Set in `.dev.vars`. */
   OPENAI_API_KEY?: string
-  /** Optional OpenAI model override (default gpt-4o-mini). */
+  /** OpenAI model id (default gpt-5.6-luna). */
   OPENAI_MODEL?: string
-  /** Cloudflare Workers AI binding (preferred; enabled in wrangler.toml). */
-  AI?: Ai
-  /** Optional Workers AI model id (default @cf/meta/llama-3.1-8b-instruct-fast). */
-  WORKERS_AI_MODEL?: string
   /** Mera portfolio Anchor program id (Devnet). */
   PROGRAM_ID?: string
   /** Base58 secret key for the keeper fee payer (never a user key). */

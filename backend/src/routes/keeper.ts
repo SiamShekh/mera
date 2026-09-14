@@ -5,6 +5,7 @@ import { keeperController } from '../controllers/keeper.controller'
 import { createDb } from '../db'
 import type { AppEnv } from '../types/env'
 import {
+  armAutopilotBodySchema,
   keeperTickBodySchema,
   linkPortfolioBodySchema,
   linkRuleBodySchema,
@@ -17,6 +18,20 @@ keeper.post('/tick', zValidator('json', keeperTickBodySchema), async (c) => {
   const result = await keeperController.tick(db, c.env, c.req.valid('json'))
   return c.json(result)
 })
+
+keeper.post(
+  '/arm',
+  zValidator('json', armAutopilotBodySchema),
+  async (c) => {
+    const db = createDb(c.env.DB)
+    const result = await keeperController.armAutopilot(
+      db,
+      c.env,
+      c.req.valid('json'),
+    )
+    return c.json(result)
+  },
+)
 
 keeper.post(
   '/portfolio',

@@ -1,5 +1,6 @@
 import { createApp } from './app'
 import { createDb } from './db'
+import { keeperController } from './controllers/keeper.controller'
 import { ensureFresh } from './solana/priceEngine'
 import type { Bindings } from './types/env'
 
@@ -13,7 +14,7 @@ const app = createApp()
 const worker = {
   fetch: app.fetch.bind(app),
 
-  /** Advance mock prices every cron minute. */
+  /** Advance mock prices + settle Autopilot sells every cron minute. */
   async scheduled(
     _controller: ScheduledController,
     env: Bindings,
@@ -23,6 +24,7 @@ const worker = {
       (async () => {
         const db = createDb(env.DB)
         await ensureFresh(db, env)
+        await keeperController.tick(db, env, { dryRun: false })
       })(),
     )
   },

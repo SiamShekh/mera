@@ -22,10 +22,6 @@ CORS_ORIGIN = "http://localhost:5173"
 PROGRAM_ID = "55SD6QmpgygjDqLG3fzcbMvFEdPT4LozjAvPwcJQZXM5"
 SOLANA_RPC_URL = "https://api.devnet.solana.com"
 
-# Workers AI binding (preferred provider for /ai/chat and /ai/compile)
-[ai]
-binding = "AI"
-
 # Advance mock prices on a schedule (GET /prices also ensureFresh every ~15s)
 [triggers]
 crons = ["*/1 * * * *"]

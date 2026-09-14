@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import { aiController } from '../controllers/ai.controller'
 import { createDb } from '../db'
 import type { AppEnv } from '../types/env'
+import { autopilotTurnBodySchema } from '../validators/autopilot'
 import { chatBodySchema } from '../validators/chat'
 import {
   compilePromptBodySchema,
@@ -24,6 +25,16 @@ ai.post('/chat', zValidator('json', chatBodySchema), async (c) => {
   const result = await aiController.chat(c.env, c.req.valid('json'))
   return c.json(result)
 })
+
+/** Autopilot brain: clarify → propose → confirm → execute intent. */
+ai.post(
+  '/autopilot',
+  zValidator('json', autopilotTurnBodySchema),
+  async (c) => {
+    const result = await aiController.autopilotTurn(c.env, c.req.valid('json'))
+    return c.json(result)
+  },
+)
 
 /** 7.11 — Re-validate an edited draft rule + refresh interpretation/preview. */
 ai.post(

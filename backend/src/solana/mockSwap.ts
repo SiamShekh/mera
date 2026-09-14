@@ -4,7 +4,13 @@ import {
   getAssociatedTokenAddressSync,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token'
-import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from '@solana/web3.js'
+import {
+  Connection,
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+} from '@solana/web3.js'
 import bs58 from 'bs58'
 
 import type { Bindings } from '../types/env'
@@ -148,11 +154,15 @@ export async function assertDepositTransfer(options: {
   destination: string
 }> {
   const expectedRaw = BigInt(
-    Math.round(options.sellAmountUi * 10 ** options.decimals),
+    Math.round(Number(options.sellAmountUi) * 10 ** options.decimals),
   )
   if (expectedRaw <= 0n) {
     throw new Error('Invalid sell amount')
   }
+
+  // Allow ±1 raw unit — percent sells often round UI floats vs on-chain integers.
+  const minRaw = expectedRaw > 1n ? expectedRaw - 1n : expectedRaw
+  const maxRaw = expectedRaw + 1n
 
   if (options.userAddress === options.treasury) {
     throw new Error(
@@ -216,12 +226,9 @@ export async function assertDepositTransfer(options: {
     const source = String(info.source ?? '')
     const destination = String(info.destination ?? '')
     const authority = String(info.authority ?? info.multisigAuthority ?? '')
-    const mintStr =
-      typeof info.mint === 'string' ? info.mint : options.sellMint
+    const mintStr = typeof info.mint === 'string' ? info.mint : options.sellMint
     let amount = 0n
-    const tokenAmount = info.tokenAmount as
-      | { amount?: string }
-      | undefined
+    const tokenAmount = info.tokenAmount as { amount?: string } | undefined
     if (tokenAmount?.amount) {
       amount = BigInt(tokenAmount.amount)
     } else if (info.amount != null) {
@@ -244,29 +251,48 @@ export async function assertDepositTransfer(options: {
       hit.mint === options.sellMint &&
       hit.destination === treasuryAta.toBase58() &&
       hit.source !== hit.destination &&
-      hit.amount >= expectedRaw &&
+      hit.amount >= minRaw &&
+      hit.amount <= maxRaw &&
       hit.authority === options.userAddress,
   )
 
-  if (!match) {
-    const selfTransfer = hits.some(
+  // Same deposit, looser authority (some wallets omit / nest authority differently).
+  const matchLoose =
+    match ??
+    hits.find(
       (hit) =>
-        hit.mint === options.sellMint && hit.source === hit.destination,
+        hit.mint === options.sellMint &&
+        hit.destination === treasuryAta.toBase58() &&
+        hit.source !== hit.destination &&
+        hit.amount >= minRaw &&
+        hit.amount <= maxRaw,
+    )
+
+  if (!matchLoose) {
+    const selfTransfer = hits.some(
+      (hit) => hit.mint === options.sellMint && hit.source === hit.destination,
     )
     if (selfTransfer) {
       throw new Error(
         'Deposit was a self-transfer (same token account). Use a wallet that is not the swap treasury.',
       )
     }
+    const amounts = hits
+      .filter((hit) => hit.mint === options.sellMint)
+      .map((hit) => hit.amount.toString())
+      .join(', ')
     throw new Error(
-      'Deposit transaction did not transfer the expected sell tokens to the treasury.',
+      `Deposit transaction did not transfer the expected sell tokens to the treasury` +
+        (amounts
+          ? ` (saw amounts [${amounts}], expected ~${expectedRaw}).`
+          : '.'),
     )
   }
 
   return {
-    rawAmount: match.amount,
-    source: match.source,
-    destination: match.destination,
+    rawAmount: matchLoose.amount,
+    source: matchLoose.source,
+    destination: matchLoose.destination,
   }
 }
 
@@ -287,9 +313,7 @@ async function confirmSignaturePolled(
     })
     const value = status?.value?.[0]
     if (value?.err) {
-      throw new Error(
-        `Payout transaction failed: ${JSON.stringify(value.err)}`,
-      )
+      throw new Error(`Payout transaction failed: ${JSON.stringify(value.err)}`)
     }
     if (
       value?.confirmationStatus === 'confirmed' ||

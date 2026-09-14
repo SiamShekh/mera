@@ -94,15 +94,34 @@ const takeProfitCompiled = z
     sellBasis: z.enum(['position', 'portfolio']).default('position'),
   })
   .superRefine((data, ctx) => {
-    for (const [path, unit, value] of [
-      ['value', data.unit, data.value],
-      ['actionValue', data.actionUnit, data.actionValue],
-    ] as const) {
-      const parsed = percentOrAmount.safeParse({ unit, value })
+    // Absolute price: value >= 0 (0 = market / sell now). Profit-%: value > 0 and <= 100.
+    if (data.unit === 'amount') {
+      if (data.value < 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value'],
+          message: 'Price trigger cannot be negative',
+        })
+      }
+    } else {
+      const parsed = percentOrAmount.safeParse({
+        unit: data.unit,
+        value: data.value,
+      })
       if (!parsed.success) {
         for (const issue of parsed.error.issues) {
-          ctx.addIssue({ ...issue, path: [path] })
+          ctx.addIssue({ ...issue, path: ['value'] })
         }
+      }
+    }
+
+    const actionParsed = percentOrAmount.safeParse({
+      unit: data.actionUnit,
+      value: data.actionValue,
+    })
+    if (!actionParsed.success) {
+      for (const issue of actionParsed.error.issues) {
+        ctx.addIssue({ ...issue, path: ['actionValue'] })
       }
     }
   })

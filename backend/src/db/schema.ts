@@ -65,6 +65,12 @@ export const rules = sqliteTable(
     onChainStatus: text('on_chain_status', {
       enum: ['pending', 'active', 'paused', 'failed'],
     }),
+    /** Autopilot: sell tokens already deposited to treasury at arm time. */
+    escrowSellAmount: real('escrow_sell_amount'),
+    escrowDepositSig: text('escrow_deposit_sig'),
+    executedAt: text('executed_at'),
+    executionTxid: text('execution_txid'),
+    executionNote: text('execution_note'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`(datetime('now'))`),

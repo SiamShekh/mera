@@ -1,5 +1,6 @@
 import { HTTPException } from 'hono/http-exception'
 
+import { runAutopilotAgent, type AutopilotAgentResult } from '../ai/autopilot-agent'
 import {
   compileNaturalLanguageRule,
   validateEditedRule,
@@ -9,6 +10,7 @@ import { generateChatReply } from '../ai/llm'
 import type { Db } from '../db'
 import { rulesController } from './rules.controller'
 import type { Bindings } from '../types/env'
+import type { AutopilotTurnBody } from '../validators/autopilot'
 import type { ChatBody } from '../validators/chat'
 import type {
   CompilePromptBody,
@@ -18,7 +20,7 @@ import type {
 import type { CreateRuleBody } from '../validators/rule'
 
 export type ChatResult =
-  | { ok: true; reply: string; provider: 'openai' | 'workers_ai' }
+  | { ok: true; reply: string; provider: 'openai' }
   | { ok: false; error: string }
 
 export const aiController = {
@@ -30,7 +32,7 @@ export const aiController = {
     return compileNaturalLanguageRule(env, body.prompt, body.holdings)
   },
 
-  /** In-app Mera AI assistant (hackathon-scoped chat). */
+  /** In-app Mera AI assistant (product-scoped chat). */
   async chat(env: Bindings, body: ChatBody): Promise<ChatResult> {
     const result = await generateChatReply(env, {
       message: body.message,
@@ -44,6 +46,20 @@ export const aiController = {
     }
 
     return { ok: true, reply: result.text, provider: result.provider }
+  },
+
+  /** Conversational Autopilot: clarify → propose → confirm → execute intent. */
+  async autopilotTurn(
+    env: Bindings,
+    body: AutopilotTurnBody,
+  ): Promise<AutopilotAgentResult> {
+    return runAutopilotAgent(env, {
+      message: body.message,
+      history: body.history,
+      holdings: body.holdings,
+      walletConnected: body.walletConnected,
+      pendingRule: body.pendingRule,
+    })
   },
 
   /** 7.11 edit → re-validate without saving. */

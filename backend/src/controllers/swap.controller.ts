@@ -124,7 +124,7 @@ export const swapController = {
     }
 
     try {
-      await assertDepositTransfer({
+      const deposit = await assertDepositTransfer({
         connection,
         signature: body.depositSignature,
         userAddress: body.userAddress,
@@ -133,6 +133,21 @@ export const swapController = {
         sellAmountUi: body.sellAmount,
         decimals: sell.decimals,
       })
+      // Prefer on-chain raw amount so float UI rounding never over-credits.
+      const actualSellUi = Number(deposit.rawAmount) / 10 ** sell.decimals
+      quote = quoteSwap({
+        tokens,
+        sellMint: body.sellMint,
+        buyMint: body.buyMint,
+        sellAmount: actualSellUi,
+      })
+      await db
+        .update(swapDeposits)
+        .set({
+          sellAmount: String(actualSellUi),
+          buyAmount: String(quote.buyAmount),
+        })
+        .where(eq(swapDeposits.signature, body.depositSignature))
     } catch (error) {
       await releaseClaim(db, body.depositSignature)
       const message =

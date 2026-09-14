@@ -5,7 +5,6 @@ import { DepositPage } from '@/pages/DepositPage'
 import { PortfolioPage } from '@/pages/PortfolioPage'
 import { SendPage } from '@/pages/SendPage'
 import { SwapPage } from '@/pages/SwapPage'
-import { VaultPage } from '@/pages/VaultPage'
 
 function App() {
   return (
@@ -15,7 +14,6 @@ function App() {
           <Route index element={<Navigate to="/swap" replace />} />
           <Route path="swap" element={<SwapPage />} />
           <Route path="portfolio" element={<PortfolioPage />} />
-          <Route path="vault" element={<VaultPage />} />
           <Route path="deposit" element={<DepositPage />} />
           <Route path="send" element={<SendPage />} />
           <Route path="*" element={<Navigate to="/swap" replace />} />

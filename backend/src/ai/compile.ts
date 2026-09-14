@@ -19,7 +19,7 @@ export type RulePreview = {
 export type CompileSuccess = {
   ok: true
   source: 'ai' | 'fallback'
-  provider?: 'openai' | 'workers_ai'
+  provider?: 'openai'
   rule: CompiledRule
   interpretation: string
   preview: RulePreview
@@ -50,9 +50,15 @@ export async function compileNaturalLanguageRule(
   if (llm.ok) {
     const fromAi = parseAndValidate(llm.text, prompt, 'ai', llm.provider)
     if (fromAi.ok) return fromAi
-    // Model returned a structured rejection — keep it (7.08)
+
+    // If the model rejects or returns invalid JSON, still try deterministic
+    // patterns (e.g. absolute-price sells) before surfacing the AI rejection.
+    const fallback = fallbackCompile(prompt)
+    if (!('rejection' in fallback)) {
+      return toCompileResult(fallback, prompt, 'fallback', undefined, llm.provider)
+    }
+
     if (fromAi.source === 'ai') return fromAi
-    // Malformed / schema-invalid AI JSON → try deterministic fallback (7.14)
   }
 
   const fallback = fallbackCompile(prompt)
@@ -97,7 +103,7 @@ function parseAndValidate(
   rawText: string,
   prompt: string,
   source: 'ai',
-  provider: 'openai' | 'workers_ai',
+  provider: 'openai',
 ): CompileResult {
   let json: unknown
   try {
@@ -139,7 +145,7 @@ function toCompileResult(
   prompt: string,
   source: 'ai' | 'fallback',
   providerError?: string,
-  provider?: 'openai' | 'workers_ai',
+  provider?: 'openai',
 ): CompileResult {
   if ('rejection' in output) {
     return {

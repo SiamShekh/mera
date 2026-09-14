@@ -7,19 +7,21 @@ import { DesktopTopBar } from '@/components/navigation/DesktopTopBar'
 import { MobileBottomNav } from '@/components/navigation/MobileBottomNav'
 import { MobileTopBar } from '@/components/navigation/MobileTopBar'
 import { PriceTicker } from '@/components/navigation/PriceTicker'
+import { AutopilotWatcher } from '@/components/vault/AutopilotWatcher'
 import { SyncUserOnConnect } from '@/components/wallet/SyncUserOnConnect'
 
 /**
  * Responsive shell:
- * - Mobile: top bar + bottom nav
- * - Desktop: sidebar + top header
- * - Mera AI: slide-over drawer (not a separate page)
+ * - Mobile: top bar + bottom nav; AI chat is a full-screen page when open
+ * - Desktop: sidebar + main + AI chat as a layout column (open by default;
+ *   closing expands main to full width; reopen via sidebar "AI Chat")
  */
 export function AppLayout() {
   return (
     <MeraAiProvider>
       <div className="min-h-svh bg-background lg:flex lg:h-svh lg:overflow-hidden">
         <SyncUserOnConnect />
+        <AutopilotWatcher />
         <DesktopSidebar />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-y-auto">

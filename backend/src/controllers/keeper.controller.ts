@@ -3,10 +3,16 @@ import { HTTPException } from 'hono/http-exception'
 
 import type { Db } from '../db'
 import { schema } from '../db'
+import {
+  executeArmedSell,
+  executePaperSell,
+  type AutopilotExecution,
+} from '../solana/autopilotSell'
 import { listConfiguredSwapTokens } from '../solana/mockSwap'
 import { ensureFresh, getPriceMap } from '../solana/priceEngine'
 import type { Bindings } from '../types/env'
 import type {
+  ArmAutopilotBody,
   KeeperTickBody,
   LinkPortfolioBody,
   LinkRuleBody,
@@ -25,6 +31,7 @@ export type KeeperTickResult = {
     portfolioValueUsd?: number
     profitPercent?: number
   }>
+  executions: AutopilotExecution[]
   skipped: number
   pricesUpdatedAt: string | null
   note: string
@@ -39,7 +46,7 @@ type HoldingRow = {
 
 /**
  * Keeper evaluates active rules against the live mock price book.
- * Live Devnet enforce needs KEEPER_SECRET_KEY + PROGRAM_ID + RPC (empty swap ok).
+ * When dryRun=false, triggered take-profit sells execute via Autopilot.
  */
 export const keeperController = {
   async linkPortfolio(db: Db, body: LinkPortfolioBody) {
@@ -94,6 +101,72 @@ export const keeperController = {
     return this.getRule(db, body.ruleId)
   },
 
+  /**
+   * Arm Autopilot after the user deposits sell tokens to treasury (one wallet sign).
+   * If the price condition is already true, settles immediately.
+   */
+  async armAutopilot(db: Db, env: Bindings, body: ArmAutopilotBody) {
+    const rule = await this.getRule(db, body.ruleId)
+    if (rule.userAddress !== body.userAddress) {
+      throw new HTTPException(403, { message: 'Rule belongs to another wallet' })
+    }
+    if (rule.status !== 'active' && !rule.executedAt) {
+      throw new HTTPException(400, { message: 'Rule is not active' })
+    }
+
+    const now = new Date().toISOString()
+    await db
+      .update(schema.rules)
+      .set({
+        mint: body.sellMint,
+        escrowSellAmount: body.sellAmount,
+        escrowDepositSig: body.depositSignature,
+        updatedAt: now,
+      })
+      .where(eq(schema.rules.id, body.ruleId))
+
+    const armed = await this.getRule(db, body.ruleId)
+    const priceMap = await getPriceMap(db, env)
+    const tokens = listConfiguredSwapTokens(env, priceMap)
+    const holdings = await fetchWalletHoldings(
+      env,
+      body.userAddress,
+      tokens,
+      priceMap,
+    )
+    const portfolioValueUsd = holdings.reduce(
+      (sum, row) => sum + row.valueUsd,
+      0,
+    )
+    const evalResult = evaluateRule(
+      armed,
+      holdings,
+      portfolioValueUsd,
+      priceMap,
+    )
+
+    if (evalResult?.triggered) {
+      const execution = await executeArmedSell(db, env, armed)
+      return {
+        armed: true as const,
+        settledNow: true as const,
+        rule: await this.getRule(db, body.ruleId),
+        execution,
+        reason: evalResult.reason,
+      }
+    }
+
+    return {
+      armed: true as const,
+      settledNow: false as const,
+      rule: armed,
+      execution: null,
+      reason:
+        evalResult?.reason ??
+        'Order armed — Autopilot will sell automatically when the price hits.',
+    }
+  },
+
   async getRule(db: Db, id: string) {
     const rule = await db.query.rules.findFirst({
       where: (fields, { eq: eqFn }) => eqFn(fields.id, id),
@@ -123,19 +196,34 @@ export const keeperController = {
           : eqFn(fields.status, 'active'),
     })
 
-    const holdings = body.userAddress
-      ? await fetchWalletHoldings(env, body.userAddress, tokens, priceMap)
-      : synthesizeDemoHoldings(tokens)
-
-    const portfolioValueUsd = holdings.reduce(
-      (sum, row) => sum + row.valueUsd,
-      0,
-    )
+    const holdingsByUser = new Map<string, HoldingRow[]>()
+    async function holdingsFor(userAddress: string) {
+      const cached = holdingsByUser.get(userAddress)
+      if (cached) return cached
+      const rowsForUser = await fetchWalletHoldings(
+        env,
+        userAddress,
+        tokens,
+        priceMap,
+      )
+      holdingsByUser.set(userAddress, rowsForUser)
+      return rowsForUser
+    }
 
     const actionable: KeeperTickResult['actionable'] = []
+    const executions: AutopilotExecution[] = []
     let skipped = 0
 
+    const canExecute = Boolean(env.SWAP_AUTHORITY_SECRET) && Boolean(env.SOLANA_RPC_URL)
+    const dryRun = body.dryRun === true || !canExecute
+
     for (const rule of rows) {
+      const holdings = await holdingsFor(rule.userAddress)
+      const portfolioValueUsd = holdings.reduce(
+        (sum, row) => sum + row.valueUsd,
+        0,
+      )
+
       const evalResult = evaluateRule(
         rule,
         holdings,
@@ -152,29 +240,50 @@ export const keeperController = {
         asset: rule.asset,
         ...evalResult,
       })
+
+      if (!dryRun && evalResult.triggered && rule.type === 'take_profit') {
+        try {
+          if (rule.escrowDepositSig && rule.escrowSellAmount && rule.mint) {
+            executions.push(await executeArmedSell(db, env, rule))
+          } else {
+            // Still try paper fill so Autopilot does something without escrow
+            executions.push(await executePaperSell(db, env, rule, holdings))
+          }
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Autopilot sell failed'
+          executions.push({
+            ruleId: rule.id,
+            asset: rule.asset,
+            soldAmount: 0,
+            buyAmount: 0,
+            buySymbol: 'USDC',
+            txid: null,
+            note: message,
+          })
+        }
+      }
     }
 
     const triggered = actionable.filter((row) => row.triggered)
-    const canBroadcast =
-      Boolean(env.KEEPER_SECRET_KEY) &&
-      Boolean(env.PROGRAM_ID) &&
-      Boolean(env.SOLANA_RPC_URL)
-
-    const dryRun = body.dryRun || !canBroadcast
+    const sold = executions.filter((row) => row.txid)
 
     return {
       dryRun,
       evaluated: rows.length,
       actionable,
+      executions,
       skipped,
       pricesUpdatedAt: book.updatedAt,
       note: dryRun
         ? triggered.length > 0
-          ? `${triggered.length} rule(s) triggered on mock prices (dryRun — no enforce tx).`
+          ? `${triggered.length} rule(s) triggered (dryRun — no sell).`
           : 'No rules triggered at current mock prices.'
-        : triggered.length > 0
-          ? `${triggered.length} rule(s) triggered — broadcast enforce_rule with empty swap when wired.`
-          : 'Keeper live; no rules triggered this tick.',
+        : sold.length > 0
+          ? `Autopilot sold ${sold.length} order(s).`
+          : triggered.length > 0
+            ? `${triggered.length} triggered — waiting for escrow or sell failed.`
+            : 'Autopilot watching — no rules triggered.',
     }
   },
 }
@@ -201,13 +310,11 @@ function evaluateRule(
     holdings.find(
       (row) =>
         row.symbol.toUpperCase() === rule.asset.toUpperCase() ||
-        (rule.mint && row.mint === rule.mint),
+        (rule.mint && row.mint === rule.mint) ||
+        aliasesMatch(row.symbol, rule.asset),
     ) ?? null
 
-  const livePrice =
-    (rule.mint ? priceMap[rule.mint] : undefined) ??
-    priceMap[rule.asset] ??
-    priceMap[rule.asset.toUpperCase()]
+  const livePrice = resolveLivePrice(priceMap, rule.asset, rule.mint)
 
   if (rule.type === 'take_profit') {
     // Demo entry = anchor-like: profit vs "would be" at static anchor if we have price
@@ -228,12 +335,26 @@ function evaluateRule(
         reason: `No live mock price for ${rule.asset}`,
       }
     }
-    const profitPercent = ((livePrice - anchor) / anchor) * 100
     const threshold = rule.value
-    const triggered =
-      rule.unit === 'percent'
-        ? profitPercent >= threshold
-        : (holding?.valueUsd ?? 0) >= threshold
+
+    // Absolute USD price trigger (unit=amount). value <= 0 = market sell now.
+    if (rule.unit === 'amount') {
+      const market = !(threshold > 0)
+      const triggered = market || livePrice >= threshold
+      return {
+        triggered,
+        assetValueUsd: holding?.valueUsd,
+        portfolioValueUsd,
+        reason: market
+          ? `${rule.asset} market sell — execute now`
+          : triggered
+            ? `${rule.asset} at $${livePrice.toFixed(2)} ≥ $${threshold} — sell now`
+            : `${rule.asset} at $${livePrice.toFixed(2)} — waiting for $${threshold}`,
+      }
+    }
+
+    const profitPercent = ((livePrice - anchor) / anchor) * 100
+    const triggered = profitPercent >= threshold
 
     return {
       triggered,
@@ -241,8 +362,8 @@ function evaluateRule(
       assetValueUsd: holding?.valueUsd,
       portfolioValueUsd,
       reason: triggered
-        ? `${rule.asset} +${profitPercent.toFixed(1)}% vs anchor (threshold ${threshold}${rule.unit === 'percent' ? '%' : ' USD'})`
-        : `${rule.asset} at ${profitPercent.toFixed(1)}% vs anchor — below take-profit ${threshold}${rule.unit === 'percent' ? '%' : ''}`,
+        ? `${rule.asset} +${profitPercent.toFixed(1)}% vs anchor (threshold ${threshold}%)`
+        : `${rule.asset} at ${profitPercent.toFixed(1)}% vs anchor — below take-profit ${threshold}%`,
     }
   }
 
@@ -377,4 +498,33 @@ async function fetchWalletHoldings(
   } catch {
     return synthesizeDemoHoldings(tokens)
   }
+}
+
+function aliasesMatch(a: string, b: string): boolean {
+  const left = a.toUpperCase()
+  const right = b.toUpperCase()
+  if (left === right) return true
+  const nvidia = new Set(['NVDA', 'NVDAX'])
+  return nvidia.has(left) && nvidia.has(right)
+}
+
+function resolveLivePrice(
+  priceMap: Record<string, number>,
+  asset: string,
+  mint: string | null,
+): number | undefined {
+  if (mint && priceMap[mint] != null) return priceMap[mint]
+  if (priceMap[asset] != null) return priceMap[asset]
+
+  const upper = asset.toUpperCase()
+  for (const [key, value] of Object.entries(priceMap)) {
+    if (key.toUpperCase() === upper) return value
+  }
+  if (upper === 'NVDA' || upper === 'NVDAX') {
+    for (const [key, value] of Object.entries(priceMap)) {
+      const k = key.toUpperCase()
+      if (k === 'NVDA' || k === 'NVDAX') return value
+    }
+  }
+  return undefined
 }

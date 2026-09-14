@@ -33,8 +33,17 @@ export function interpretRule(rule: CompiledRule, prompt?: string): string {
       ? 'of your total portfolio'
       : `of your ${rule.asset} position`
 
+  const when =
+    rule.unit === 'amount'
+      ? rule.value > 0
+        ? `When ${rule.asset} trades at or above ${trigger}`
+        : `Sell ${rule.asset} at market now`
+      : `When ${rule.asset} is up ${trigger}`
+
   return [
-    `When ${rule.asset} is up ${trigger}, sell ${action} ${basis}.`,
+    rule.unit === 'amount' && !(rule.value > 0)
+      ? `${when}: sell ${action} ${basis}. Autopilot executes as soon as the order is armed.`
+      : `${when}, sell ${action} ${basis}. If the condition is already true, Autopilot sells automatically.`,
     prompt ? `Based on: “${prompt}”` : null,
   ]
     .filter(Boolean)

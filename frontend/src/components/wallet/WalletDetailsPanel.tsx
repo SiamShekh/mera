@@ -1,6 +1,7 @@
 import { useDisconnect } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   ArrowDownToLine,
@@ -29,6 +30,8 @@ type WalletDetailsPanelProps = {
 
 /**
  * Wallet details slide-over: balance, holdings list, disconnect.
+ * Portaled to document.body so backdrop-blur on the top bar does not trap
+ * `position: fixed` (which caused overlapping page content).
  */
 export function WalletDetailsPanel({
   open,
@@ -119,7 +122,7 @@ export function WalletDetailsPanel({
     ? '••••'
     : `~${formatSol(totalSol).replace(' SOL', '')} SOL`
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
       <button
         type="button"
@@ -275,7 +278,8 @@ export function WalletDetailsPanel({
           <span className="text-sm font-semibold text-foreground">$0</span>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

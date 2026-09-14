@@ -262,7 +262,8 @@ function assetName(mint: string, marketSymbol: string | null): string {
   if (mint === 'native') {
     return 'SOL'
   }
-  const known = marketSymbol ?? KNOWN_ASSETS[mint]
+  // Prefer our known ticker so Autopilot matching stays stable (not display names).
+  const known = KNOWN_ASSETS[mint] ?? marketSymbol
   if (known) {
     return known
   }

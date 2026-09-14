@@ -17,6 +17,40 @@ const thresholdSchema = z
     value: z.number(),
   })
   .superRefine(({ unit, value }, ctx) => {
+    // Amount may be 0 for market / sell-now take-profit triggers.
+    if (unit === 'amount') {
+      if (value < 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value'],
+          message: 'Value cannot be negative',
+        })
+      }
+      return
+    }
+    if (!(value > 0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message: 'Value must be greater than 0',
+      })
+      return
+    }
+    if (value > 100) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message: 'Percent cannot exceed 100',
+      })
+    }
+  })
+
+const actionThresholdSchema = z
+  .object({
+    unit: unitSchema,
+    value: z.number(),
+  })
+  .superRefine(({ unit, value }, ctx) => {
     if (!(value > 0)) {
       ctx.addIssue({
         code: 'custom',
@@ -45,7 +79,7 @@ const allocationSchema = z
     status: z.enum(['draft', 'active', 'paused']).default('active'),
   })
   .superRefine((data, ctx) => {
-    const parsed = thresholdSchema.safeParse({
+    const parsed = actionThresholdSchema.safeParse({
       unit: data.unit,
       value: data.value,
     })
@@ -80,7 +114,7 @@ const takeProfitSchema = z
       }
     }
 
-    const action = thresholdSchema.safeParse({
+    const action = actionThresholdSchema.safeParse({
       unit: data.actionUnit,
       value: data.actionValue,
     })

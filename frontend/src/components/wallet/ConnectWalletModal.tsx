@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect } from 'react'
+import { createPortal } from 'react-dom'
 
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -109,7 +110,7 @@ export function ConnectWalletModal({
     (wallet) => !installedNames.has(wallet.name.toLowerCase()),
   )
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex justify-end">
       <button
         type="button"
@@ -253,6 +254,7 @@ export function ConnectWalletModal({
           </div>
         ) : null}
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }
