@@ -5,13 +5,7 @@ import {
 } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
 import { useEffect, useMemo, useState } from 'react'
-import {
-  ArrowDownUp,
-  ChevronDown,
-  Droplets,
-  Settings2,
-  Sparkles,
-} from 'lucide-react'
+import { ArrowDownUp, ChevronDown, Settings2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { TokenIcon } from '@/components/TokenIcon'
@@ -26,21 +20,17 @@ import {
   useCompleteSwapMutation,
   useGetPricesQuery,
   useSwapConfigQuery,
-  useSwapFaucetMutation,
 } from '@/store/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
+import { PORTFOLIO_REFRESH_EVENT } from '@/lib/portfolioRefresh'
 import type { Holding } from '@/types/holding'
-
-type SwapMode = 'Market' | 'Limit' | 'DCA'
 
 type SwapFormProps = {
   className?: string
 }
 
-/**
- * Devnet mock Spot swap — fixed rates between USDC / SOLx / stX / NVDAx.
- */
+/** Spot market swap. */
 export function SwapForm({ className }: SwapFormProps) {
   const client = useClient<AppClient>()
   const wallets = useWallets(client)
@@ -52,11 +42,8 @@ export function SwapForm({ className }: SwapFormProps) {
   const { data: swapConfig } = useSwapConfigQuery(undefined, {
     pollingInterval: 15_000,
   })
-  const { data: priceBook } = useGetPricesQuery(undefined, {
-    pollingInterval: 10_000,
-  })
+  const { data: priceBook } = useGetPricesQuery()
   const [completeSwap] = useCompleteSwapMutation()
-  const [runFaucet, faucetState] = useSwapFaucetMutation()
 
   const assets = useMemo(() => {
     const priceByMint = new Map(
@@ -78,7 +65,6 @@ export function SwapForm({ className }: SwapFormProps) {
     return base
   }, [swapConfig, priceBook])
 
-  const [mode, setMode] = useState<SwapMode>('Market')
   const [sellAmount, setSellAmount] = useState('')
   const [sellMintOverride, setSellMintOverride] = useState<string | null>(null)
   const [buyMintOverride, setBuyMintOverride] = useState<string | null>(null)
@@ -99,9 +85,14 @@ export function SwapForm({ className }: SwapFormProps) {
     void dispatch(loadPortfolio(owner))
     const id = window.setInterval(() => {
       void dispatch(loadPortfolio(owner))
-    }, 20_000)
+    }, 8_000)
+    const onRefresh = () => {
+      void dispatch(loadPortfolio(owner))
+    }
+    window.addEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh)
     return () => {
       window.clearInterval(id)
+      window.removeEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh)
     }
   }, [dispatch, owner])
 
@@ -171,47 +162,25 @@ export function SwapForm({ className }: SwapFormProps) {
     return fallback
   }
 
-  async function onFaucet() {
-    if (!owner) {
-      setConnectOpen(true)
-      return
-    }
-    setError(null)
-    setSuccess(null)
-    try {
-      const result = await runFaucet({ userAddress: owner }).unwrap()
-      setSuccess(`Faucet sent — ${result.signature.slice(0, 8)}…`)
-      void dispatch(loadPortfolio(owner))
-    } catch (err) {
-      setError(apiErrorMessage(err, 'Faucet failed'))
-    }
-  }
-
   async function onSwap() {
     setError(null)
     setSuccess(null)
 
-    if (mode !== 'Market') {
-      setError(`${mode} mode is preview only — use Market.`)
-      return
-    }
     if (!owner || !signer) {
       setConnectOpen(true)
       return
     }
     if (!sellAsset || !buyAsset) {
-      setError('Configure mock mints first (USDC / SOLx / stX / NVDAx).')
+      setError('Select tokens to swap.')
       return
     }
     if (!treasury) {
-      setError(
-        'Swap treasury not ready. Set SWAP_AUTHORITY_SECRET + mock mints on the backend.',
-      )
+      setError('Swap is temporarily unavailable. Try again later.')
       return
     }
     if (owner === treasury) {
       setError(
-        'You are connected as the swap treasury wallet. Connect a different Devnet wallet to swap.',
+        'You are connected as the swap treasury wallet. Connect a different wallet to swap.',
       )
       return
     }
@@ -221,7 +190,7 @@ export function SwapForm({ className }: SwapFormProps) {
       return
     }
     if (!sellHolding || sellHolding.quantity < parsedSell) {
-      setError(`Not enough ${sellAsset.symbol} — try the faucet.`)
+      setError(`Not enough ${sellAsset.symbol}.`)
       return
     }
     if (!sellHolding.tokenProgram) {
@@ -283,9 +252,7 @@ export function SwapForm({ className }: SwapFormProps) {
         lower.includes('lamport') ||
         lower.includes('fund')
       ) {
-        setError(
-          'Not enough SOL for network fees — press Faucet again (it now drips Devnet SOL).',
-        )
+        setError('Not enough SOL for network fees.')
       } else {
         setError(message)
       }
@@ -300,57 +267,12 @@ export function SwapForm({ className }: SwapFormProps) {
       ? 'Swapping…'
       : !sellAmount
         ? 'Enter an amount'
-        : mode !== 'Market'
-          ? `${mode} (preview)`
-          : `Swap ${sellAsset?.symbol ?? ''} → ${buyAsset?.symbol ?? ''}`
+        : `Swap ${sellAsset?.symbol ?? ''} → ${buyAsset?.symbol ?? ''}`
 
   return (
     <section className={cn('rounded-2xl bg-card p-3 sm:p-4', className)}>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1 rounded-full bg-secondary p-1">
-          {(['Market', 'Limit', 'DCA'] as const).map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => {
-                setMode(item)
-              }}
-              className={cn(
-                'rounded-full px-3 py-1.5 text-xs font-semibold transition-colors',
-                mode === item
-                  ? 'bg-lime text-lime-foreground'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {item}
-            </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => {
-              void onFaucet()
-            }}
-            disabled={faucetState.isLoading}
-            className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-            title="Mint demo tokens to your wallet"
-          >
-            <Droplets className="size-3.5" />
-            Faucet
-          </button>
-          <span className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-muted-foreground">
-            <Sparkles className="size-3.5" />
-            Devnet
-          </span>
-          <button
-            type="button"
-            className="rounded-lg p-1.5 text-muted-foreground"
-            aria-label="Swap settings"
-          >
-            <Settings2 className="size-4" />
-          </button>
-        </div>
+        <p className="text-sm font-semibold text-foreground">Market</p>
       </div>
 
       <TokenLeg
@@ -391,7 +313,7 @@ export function SwapForm({ className }: SwapFormProps) {
       {sellAsset && buyAsset && buyAmount > 0 ? (
         <p className="mt-2 text-center text-[11px] text-muted-foreground">
           1 {sellAsset.symbol} ≈ {quoteMockSwap(sellAsset, buyAsset, 1)}{' '}
-          {buyAsset.symbol} · mock Devnet rate
+          {buyAsset.symbol}
         </p>
       ) : null}
 
@@ -404,7 +326,7 @@ export function SwapForm({ className }: SwapFormProps) {
 
       <Button
         type="button"
-        disabled={busy || (Boolean(owner) && mode === 'Market' && !sellAmount)}
+        disabled={busy || (Boolean(owner) && !sellAmount)}
         onClick={() => {
           if (!owner) {
             setConnectOpen(true)
@@ -416,16 +338,6 @@ export function SwapForm({ className }: SwapFormProps) {
       >
         {buttonLabel}
       </Button>
-
-      {mode !== 'Market' ? (
-        <p className="mt-3 text-center text-xs text-muted-foreground">
-          {mode} mode is a UI preview only for now.
-        </p>
-      ) : (
-        <p className="mt-3 text-center text-xs text-muted-foreground">
-          Mock swap on Devnet — no Jupiter. Uses SOLx / stX / USDC / NVDAx.
-        </p>
-      )}
 
       {picker && sellAsset && buyAsset ? (
         <TokenPicker
@@ -557,11 +469,11 @@ function TokenPicker({
         aria-label="Close token picker"
         onClick={onClose}
       />
-      <div className="relative z-10 w-full max-w-md rounded-t-2xl bg-card p-4 sm:rounded-2xl">
-        <p className="mb-3 text-sm font-semibold text-foreground">
+      <div className="relative z-10 flex max-h-[min(70vh,32rem)] w-full max-w-md flex-col rounded-t-2xl bg-card p-4 sm:rounded-2xl">
+        <p className="mb-3 shrink-0 text-sm font-semibold text-foreground">
           Select token
         </p>
-        <ul className="space-y-1">
+        <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain">
           {assets
             .filter((asset) => asset.mint !== excludeMint)
             .map((asset) => (

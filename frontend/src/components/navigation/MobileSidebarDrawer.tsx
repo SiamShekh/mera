@@ -4,8 +4,8 @@ import { X } from 'lucide-react'
 
 import {
   SidebarBrand,
-  SidebarHelpButton,
   SidebarNav,
+  SidebarUtilities,
 } from '@/components/navigation/sidebarNav'
 import { Button } from '@/components/ui/button'
 
@@ -72,7 +72,7 @@ export function MobileSidebarDrawer({
             type="button"
             variant="ghost"
             size="icon"
-            className="rounded-xl"
+            className="cursor-pointer rounded-xl"
             onClick={onClose}
             aria-label="Close menu"
           >
@@ -85,8 +85,8 @@ export function MobileSidebarDrawer({
           className="min-h-0 flex-1 overflow-y-auto px-3 pb-4"
         />
 
-        <div className="shrink-0 border-t border-border px-3 py-3">
-          <SidebarHelpButton />
+        <div className="shrink-0 border-t border-border px-3 py-4">
+          <SidebarUtilities onNavigate={onClose} />
         </div>
       </aside>
     </div>,

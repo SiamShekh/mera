@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { useGetPricesQuery } from '@/store/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
+import { PORTFOLIO_REFRESH_EVENT } from '@/lib/portfolioRefresh'
 
 type HoldingsListProps = {
   ownerAddress: string
@@ -53,12 +54,17 @@ export function HoldingsList({
   const { holdings, loading, error } = useAppSelector(
     (state) => state.portfolio,
   )
-  const { data: priceBook } = useGetPricesQuery(undefined, {
-    pollingInterval: 10_000,
-  })
+  const { data: priceBook } = useGetPricesQuery()
 
   useEffect(() => {
     void dispatch(loadPortfolio(ownerAddress))
+    const onRefresh = () => {
+      void dispatch(loadPortfolio(ownerAddress))
+    }
+    window.addEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh)
+    return () => {
+      window.removeEventListener(PORTFOLIO_REFRESH_EVENT, onRefresh)
+    }
   }, [dispatch, ownerAddress])
 
   // Refresh holdings USD when the mock oracle advances
@@ -131,7 +137,7 @@ export function HoldingsList({
               </Button>
             </div>
             <p className="mt-3 text-xs text-muted-foreground">
-              Send transfers on Devnet · Deposit shows your Solana QR.
+              Send assets or deposit with your Solana QR.
             </p>
           </section>
 

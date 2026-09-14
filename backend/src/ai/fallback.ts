@@ -29,6 +29,12 @@ export function fallbackCompile(
     )
   }
 
+  const stopLoss = tryStopLoss(text, lower)
+  if (stopLoss) return stopLoss
+
+  const buyOrder = tryBuyOrder(text, lower)
+  if (buyOrder) return buyOrder
+
   const absolutePrice = tryAbsolutePriceSell(text, lower)
   if (absolutePrice) return absolutePrice
 
@@ -46,7 +52,7 @@ export function fallbackCompile(
 
   return rejection(
     'unsupported',
-    'Could not compile that into a supported rule. Try something like “sell 50% of NVIDIA above $100”, “sell 50% of my NVDAx”, or “keep at least $100 USDC”.',
+    'Could not compile that into a supported rule. Try something like “sell 50% of NVIDIA above $100”, “stop loss NVDAx at $80”, or “keep at least $100 USDC”.',
   )
 }
 
@@ -274,6 +280,187 @@ function tryMinAllocation(
   )
 }
 
+/**
+ * Stop-loss: "sell if price drops to $80" / "stop loss at $80" / "if down 15%, sell 50%"
+ */
+function tryStopLoss(
+  text: string,
+  lower: string,
+): CompiledRule | CompiledRuleRejection | null {
+  const looksLikeStop =
+    /\bstop[\s-]?loss\b/i.test(text) ||
+    /(sell).*(when|if).*(price|\$)?[^\n.]{0,40}(below|under|drops? to|falls? to|goes below|at or below)/i.test(
+      text,
+    ) ||
+    /(when|if).*(price|\$)?[^\n.]{0,40}(below|under|drops? to|falls? to|goes below).{0,40}(sell)/i.test(
+      text,
+    ) ||
+    /(when|if).*(down|drops?|falls?|loses?).{0,20}\d/.test(text)
+  if (!looksLikeStop) return null
+
+  // Prefer absolute USD floor when present with below/drop language
+  const priceMatch =
+    lower.match(
+      /(?:below|under|drops?\s+to|falls?\s+to|goes\s+below|at\s+or\s+below|stop[\s-]?loss(?:\s+at)?)\s*\$?\s*(\d+(?:\.\d+)?)/,
+    ) ??
+    (/\b(below|under|drops?\s+to|falls?\s+to)\b/.test(lower)
+      ? lower.match(/\$\s*(\d+(?:\.\d+)?)/)
+      : null)
+
+  const percents = [...lower.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) =>
+    Number(m[1]),
+  )
+  const asset = extractAsset(text)
+  if (!asset) {
+    return rejection(
+      'missing_details',
+      'Name the asset for this stop-loss (e.g. NVIDIA / NVDAx).',
+    )
+  }
+
+  let actionValue = extractSellSizePercent(lower)
+  if (actionValue === null) {
+    actionValue = 100
+  }
+  if (!(actionValue > 0) || actionValue > 100) {
+    return rejection(
+      'invalid_percent',
+      'Sell size percent must be between 0 and 100.',
+    )
+  }
+
+  if (priceMatch) {
+    const value = Number(priceMatch[1])
+    if (!(value > 0)) {
+      return rejection('missing_details', 'Stop-loss price must be greater than 0.')
+    }
+    return {
+      type: 'stop_loss',
+      asset,
+      unit: 'amount',
+      value,
+      actionUnit: 'percent',
+      actionValue,
+      sellBasis: 'position',
+    }
+  }
+
+  if (percents.length >= 1) {
+    const trigger = percents[0]
+    const action = percents.length >= 2 ? percents[1] : actionValue
+    if (trigger > 100 || action > 100) {
+      return rejection(
+        'invalid_percent',
+        'Percent values must be between 0 and 100.',
+      )
+    }
+    return {
+      type: 'stop_loss',
+      asset,
+      unit: 'percent',
+      value: trigger,
+      actionUnit: 'percent',
+      actionValue: action,
+      sellBasis: 'position',
+    }
+  }
+
+  return rejection(
+    'missing_details',
+    'Stop-loss needs a price floor (e.g. “drops to $80”) or a loss % (e.g. “down 15%”).',
+  )
+}
+
+/**
+ * Buy: "buy 5 nvidia with usdc" / "buy 2 nvdax at $80"
+ * Single-leg only in fallback; ladders need the Autopilot agent.
+ */
+function tryBuyOrder(
+  text: string,
+  lower: string,
+): CompiledRule | CompiledRuleRejection | null {
+  if (!/\bbuy\b/i.test(text)) return null
+  // Skip multi-leg ladders — agent handles those
+  if ((lower.match(/\bbuy\b/g) ?? []).length > 1) return null
+
+  const qtyMatch =
+    lower.match(/\bbuy\s+(\d+(?:\.\d+)?)\s+/) ??
+    lower.match(/\b(\d+(?:\.\d+)?)\s+(?:shares?\s+of\s+)?/)
+  const priceMatch =
+    lower.match(
+      /(?:at|@|below|under|limit(?:\s+of)?)\s*\$?\s*(\d+(?:\.\d+)?)/,
+    ) ?? null
+  const market = /\b(market|now|current\s+price)\b/.test(lower)
+
+  const asset = extractAsset(text)
+  if (!asset) {
+    return rejection(
+      'missing_details',
+      'Name the asset to buy (e.g. NVIDIA / NVDAx).',
+    )
+  }
+  if (asset.toUpperCase() === 'USDC') {
+    return rejection('unsupported', 'Buy a tokenized stock, not USDC itself.')
+  }
+
+  const qty = qtyMatch ? Number(qtyMatch[1]) : null
+  if (!(qty != null && qty > 0)) {
+    return rejection(
+      'missing_details',
+      'Say how many shares to buy (e.g. “buy 5 NVDAx …”).',
+    )
+  }
+
+  let payAsset = normalizeAsset('USDC')
+  const withMatch = text.match(
+    /\b(?:with|using|paid?\s+with|from)\s+([A-Za-z][A-Za-z0-9._-]*)/i,
+  )
+  if (withMatch) {
+    payAsset = normalizeAsset(withMatch[1]) ?? payAsset
+  } else if (!market && !priceMatch) {
+    // Missing pay asset AND price — reject so agent clarify can list balances
+    return rejection(
+      'missing_details',
+      'Say what to pay with (e.g. USDC) and whether this is market or a limit price.',
+    )
+  }
+
+  if (!payAsset) {
+    return rejection('missing_details', 'Name the pay asset (usually USDC).')
+  }
+
+  if (priceMatch && !market) {
+    const limitPrice = Number(priceMatch[1])
+    if (!(limitPrice > 0)) {
+      return rejection('missing_details', 'Limit price must be greater than 0.')
+    }
+    return {
+      type: 'limit_buy',
+      asset,
+      unit: 'amount',
+      value: qty,
+      payAsset,
+      limitPrice,
+    }
+  }
+
+  if (market || (withMatch && !priceMatch)) {
+    return {
+      type: 'market_buy',
+      asset,
+      unit: 'amount',
+      value: qty,
+      payAsset,
+      limitPrice: null,
+    }
+  }
+
+  return rejection(
+    'missing_details',
+    'Say market now or a limit price (e.g. “at $100”).',
+  )
+}
+
 function tryTakeProfit(
   text: string,
   lower: string,
@@ -407,6 +594,16 @@ function extractAsset(text: string): string | null {
 }
 
 function isUnsafe(lower: string): boolean {
+  // Allow in-app “sell all stocks / liquidate to USDC”; still block off-wallet drains.
+  if (
+    /(sell|liquidate).*(all|everything).*(to\s+)?usdc|sell\s+all\s+(my\s+)?(stocks?|tokens?|assets?)/i.test(
+      lower,
+    )
+  ) {
+    return /(send (all|everything) to|drain wallet|rug|leverage|margin|short sell|borrow)/i.test(
+      lower,
+    )
+  }
   return /(leverage|margin|short sell|liquidate everything|send (all|everything) to|drain wallet|rug|borrow)/i.test(
     lower,
   )

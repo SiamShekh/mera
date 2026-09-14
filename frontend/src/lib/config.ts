@@ -2,15 +2,20 @@
 
 export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
 
-/** Solana Devnet only (hackathon — mock USDC / xStock). */
-export const SOLANA_CHAIN = 'solana:devnet' as const
-export const NETWORK_LABEL = 'Devnet'
+/** Socket.io realtime (same origin as API by default). */
+export const SOCKET_URL =
+  import.meta.env.VITE_SOCKET_URL ?? API_URL
 
-/** Devnet RPC — set Helius Devnet URL in `.env`. */
+/** Solana network label shown in the UI. */
+export const SOLANA_CHAIN = 'solana:devnet' as const
+export const NETWORK_LABEL =
+  import.meta.env.VITE_NETWORK_LABEL ?? 'Solana'
+
+/** Solana RPC URL — set in `.env`. */
 export const SOLANA_RPC_URL =
   import.meta.env.VITE_SOLANA_RPC_URL ?? 'https://api.devnet.solana.com'
 
-/** Anchor programmable portfolio program (Devnet). */
+/** Anchor programmable portfolio program id. */
 export const MERA_PROGRAM_ID =
   import.meta.env.VITE_MERA_PROGRAM_ID ??
   '55SD6QmpgygjDqLG3fzcbMvFEdPT4LozjAvPwcJQZXM5'

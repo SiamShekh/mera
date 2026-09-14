@@ -1,27 +1,17 @@
-import { Hono } from 'hono'
-import { HTTPException } from 'hono/http-exception'
+import express from 'express'
 
-import { corsMiddleware } from './middleware/cors'
+import { corsMiddleware, errorHandler } from './middleware/cors'
 import { routes } from './routes'
-import type { AppEnv } from './types/env'
 
 export function createApp() {
-  const app = new Hono<AppEnv>()
-
-  app.use('*', corsMiddleware)
-  app.route('/', routes)
-
-  app.notFound((c) => c.json({ error: 'Not found' }, 404))
-
-  app.onError((err, c) => {
-    if (err instanceof HTTPException) {
-      return c.json({ error: err.message }, err.status)
-    }
-
-    console.error(err)
-    return c.json({ error: 'Internal server error' }, 500)
+  const app = express()
+  app.use(corsMiddleware())
+  app.use(express.json({ limit: '2mb' }))
+  app.use(routes)
+  app.use((_req, res) => {
+    res.status(404).json({ error: 'Not found' })
   })
-
+  app.use(errorHandler)
   return app
 }
 

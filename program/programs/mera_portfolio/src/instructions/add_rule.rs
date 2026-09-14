@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 use crate::errors::PortfolioError;
-use crate::state::{Portfolio, Rule, RuleType, RuleUnit, SellBasis};
+use crate::state::{Portfolio, RuleEntry, RuleType, RuleUnit, SellBasis};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct AddRuleArgs {
@@ -16,7 +16,6 @@ pub struct AddRuleArgs {
 
 #[derive(Accounts)]
 pub struct AddRule<'info> {
-    #[account(mut)]
     pub owner: Signer<'info>,
 
     #[account(
@@ -27,50 +26,32 @@ pub struct AddRule<'info> {
         constraint = !portfolio.paused @ PortfolioError::PortfolioPaused
     )]
     pub portfolio: Account<'info, Portfolio>,
-
-    #[account(
-        init,
-        payer = owner,
-        space = 8 + Rule::INIT_SPACE,
-        seeds = [
-            Rule::SEED,
-            portfolio.key().as_ref(),
-            &portfolio.next_rule_id.to_le_bytes()
-        ],
-        bump
-    )]
-    pub rule: Account<'info, Rule>,
-
-    pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<AddRule>, args: AddRuleArgs) -> Result<()> {
     validate_args(&args)?;
 
     let portfolio = &mut ctx.accounts.portfolio;
-    let rule = &mut ctx.accounts.rule;
-    let clock = Clock::get()?;
-    let rule_id = portfolio.next_rule_id;
+    let slot = portfolio
+        .find_free_slot()
+        .ok_or(PortfolioError::RuleSlotsFull)?;
 
-    rule.portfolio = portfolio.key();
-    rule.rule_id = rule_id;
-    rule.bump = ctx.bumps.rule;
-    rule.rule_type = args.rule_type;
-    rule.mint = args.mint;
-    rule.unit = args.unit;
-    rule.value = args.value;
-    rule.action_unit = args.action_unit;
-    rule.action_value = args.action_value;
-    rule.sell_basis = args.sell_basis;
-    rule.paused = false;
-    rule.created_at = clock.unix_timestamp;
-    rule.params_version = 1;
+    let rule_id = portfolio.next_rule_id;
+    require!(rule_id > 0, PortfolioError::MathOverflow);
+
+    portfolio.rules[slot] = RuleEntry {
+        id: rule_id,
+        active: true,
+        rule_type: args.rule_type,
+        mint: args.mint,
+        unit: args.unit,
+        value: args.value,
+        action_unit: args.action_unit,
+        action_value: args.action_value,
+        sell_basis: args.sell_basis,
+    };
 
     portfolio.next_rule_id = rule_id
-        .checked_add(1)
-        .ok_or(PortfolioError::MathOverflow)?;
-    portfolio.rule_count = portfolio
-        .rule_count
         .checked_add(1)
         .ok_or(PortfolioError::MathOverflow)?;
 

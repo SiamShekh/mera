@@ -7,6 +7,7 @@ import {
   USDC_MINT,
 } from '@/lib/mints'
 import { TOKEN_ICONS } from '@/lib/tokenIcons'
+import { XSTOCKS_CATALOG } from '@/data/xstocks'
 import type { Holding } from '@/types/holding'
 
 /** Wrapped SOL mint — used for USD price / icon lookups */
@@ -23,6 +24,7 @@ const KNOWN_ASSETS: Record<string, string> = {
   [NVDAX_MINT]: 'NVDAx',
   [SOLX_MINT]: 'SOLx',
   [STX_MINT]: 'stX',
+  ...Object.fromEntries(XSTOCKS_CATALOG.map((row) => [row.mint, row.symbol])),
 }
 
 /** Local icons — same as TokenIcon / public/tokens */
@@ -33,6 +35,7 @@ const KNOWN_ICONS: Record<string, string> = {
   [NVDAX_MINT]: TOKEN_ICONS.NVDAx,
   [SOLX_MINT]: TOKEN_ICONS.SOLx,
   [STX_MINT]: TOKEN_ICONS.stX,
+  ...Object.fromEntries(XSTOCKS_CATALOG.map((row) => [row.mint, row.icon])),
 }
 
 type RpcTokenAccount = {

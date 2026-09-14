@@ -10,13 +10,13 @@ import {
   Copy,
   Eye,
   EyeOff,
-  ExternalLink,
   LogOut,
   X,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { TokenIcon } from '@/components/TokenIcon'
+import { XSTOCK_BY_SYMBOL } from '@/data/xstocks'
 import { formatMoney, formatQty, formatSol, shortenAddress } from '@/lib/format'
 import type { AppClient } from '@/lib/solanaClient'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
@@ -269,14 +269,6 @@ export function WalletDetailsPanel({
             ))}
           </ul>
         </div>
-
-        <div className="mt-auto flex items-center justify-between border-t border-border bg-card px-5 py-4">
-          <span className="inline-flex items-center gap-1.5 text-sm font-medium text-foreground">
-            Other DeFi Positions
-            <ExternalLink className="size-3.5 text-muted-foreground" />
-          </span>
-          <span className="text-sm font-semibold text-foreground">$0</span>
-        </div>
       </aside>
     </div>,
     document.body,
@@ -290,12 +282,14 @@ function displayAssetName(asset: string): string {
     case 'USDC':
       return 'USD Coin'
     case 'SOLx':
-      return 'Mock SOL'
+      return 'SOL'
     case 'stX':
       return 'Staked X'
     case 'NVDAx':
       return 'NVIDIA xStock'
-    default:
-      return asset
+    default: {
+      const stock = XSTOCK_BY_SYMBOL[asset]
+      return stock?.name ?? asset
+    }
   }
 }

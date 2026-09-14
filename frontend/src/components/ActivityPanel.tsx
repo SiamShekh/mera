@@ -19,7 +19,7 @@ function formatWhen(blockTime: number | null) {
 }
 
 /**
- * Recent on-chain activity for the connected wallet (Devnet signatures).
+ * Recent on-chain activity for the connected wallet.
  */
 export function ActivityPanel({ ownerAddress }: ActivityPanelProps) {
   const dispatch = useAppDispatch()
@@ -37,7 +37,7 @@ export function ActivityPanel({ ownerAddress }: ActivityPanelProps) {
             Activity
           </h2>
           <p className="text-sm text-muted-foreground">
-            Recent Devnet transactions
+            Recent transactions
           </p>
         </div>
         <Button

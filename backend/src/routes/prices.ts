@@ -1,44 +1,33 @@
-import { Hono } from 'hono'
+import { Router } from 'express'
 
-import { keeperController } from '../controllers/keeper.controller'
-import { createDb } from '../db'
+import { env } from '../config/env'
 import { ensureFresh, getPriceBook, stepAll } from '../solana/priceEngine'
-import type { AppEnv } from '../types/env'
 
-const prices = new Hono<AppEnv>()
+export const pricesRouter = Router()
 
-/** Throttle Autopilot settlement when clients poll /prices (local cron is flaky). */
-let lastAutopilotMs = 0
-const AUTOPILOT_MIN_INTERVAL_MS = 12_000
-
-/** Current mock book + recent ticks (auto-advances if stale). */
-prices.get('/', async (c) => {
-  const db = createDb(c.env.DB)
-  const book = await ensureFresh(db, c.env)
-
-  const now = Date.now()
-  if (now - lastAutopilotMs >= AUTOPILOT_MIN_INTERVAL_MS) {
-    lastAutopilotMs = now
-    c.executionCtx.waitUntil(
-      keeperController.tick(db, c.env, { dryRun: false }).catch(() => null),
-    )
+pricesRouter.get('/', async (_req, res, next) => {
+  try {
+    const book = await ensureFresh(env())
+    res.json(book)
+  } catch (error) {
+    next(error)
   }
-
-  return c.json(book)
 })
 
-/** Force one simulation step (demo / cron helper). */
-prices.post('/tick', async (c) => {
-  const db = createDb(c.env.DB)
-  const book = await stepAll(db, c.env)
-  return c.json(book)
+pricesRouter.post('/tick', async (_req, res, next) => {
+  try {
+    const book = await stepAll(env())
+    res.json(book)
+  } catch (error) {
+    next(error)
+  }
 })
 
-/** Snapshot without advancing (debug). */
-prices.get('/snapshot', async (c) => {
-  const db = createDb(c.env.DB)
-  const book = await getPriceBook(db)
-  return c.json(book)
+pricesRouter.get('/snapshot', async (_req, res, next) => {
+  try {
+    const book = await getPriceBook()
+    res.json(book)
+  } catch (error) {
+    next(error)
+  }
 })
-
-export { prices }

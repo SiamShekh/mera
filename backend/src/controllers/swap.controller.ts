@@ -1,8 +1,5 @@
-import { eq } from 'drizzle-orm'
-import { HTTPException } from 'hono/http-exception'
-
-import type { Db } from '../db'
-import { swapDeposits } from '../db/schema'
+import { AppError } from '../errors'
+import { SwapDeposit } from '../models'
 import {
   assertDepositTransfer,
   faucetMockTokens,
@@ -17,8 +14,8 @@ import type { Bindings } from '../types/env'
 import type { SwapCompleteBody, SwapFaucetBody } from '../validators/swap'
 
 export const swapController = {
-  async config(env: Bindings, db: Db) {
-    const live = await getPriceMap(db, env)
+  async config(env: Bindings) {
+    const live = await getPriceMap(env)
     const tokens = listConfiguredSwapTokens(env, live)
     let treasury: string | null
     try {
@@ -33,25 +30,24 @@ export const swapController = {
 
   async quote(
     env: Bindings,
-    db: Db,
     body: { sellMint: string; buyMint: string; sellAmount: number },
   ) {
-    const live = await getPriceMap(db, env)
+    const live = await getPriceMap(env)
     const tokens = listConfiguredSwapTokens(env, live)
     try {
       return { ok: true as const, ...quoteSwap({ tokens, ...body }) }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Quote failed'
-      throw new HTTPException(400, { message })
+      throw new AppError(400, message)
     }
   },
 
   /**
-   * Idempotent complete: claim deposit signature in D1 BEFORE minting so retries
+   * Idempotent complete: claim deposit signature BEFORE minting so retries
    * cannot double-credit.
    */
-  async complete(env: Bindings, db: Db, body: SwapCompleteBody) {
-    const book = await getPriceBook(db)
+  async complete(env: Bindings, body: SwapCompleteBody) {
+    const book = await getPriceBook()
     const live: Record<string, number> = {}
     for (const row of book.prices) {
       live[row.mint] = row.priceUsd
@@ -61,7 +57,7 @@ export const swapController = {
     const sell = tokens.find((t) => t.mint === body.sellMint)
     const buy = tokens.find((t) => t.mint === body.buyMint)
     if (!sell || !buy) {
-      throw new HTTPException(400, { message: 'Unknown sell or buy mint' })
+      throw new AppError(400, 'Unknown sell or buy mint')
     }
 
     let quote
@@ -74,10 +70,10 @@ export const swapController = {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Quote failed'
-      throw new HTTPException(400, { message })
+      throw new AppError(400, message)
     }
 
-    const claim = await claimDepositSlot(db, {
+    const claim = await claimDepositSlot({
       signature: body.depositSignature,
       userAddress: body.userAddress,
       sellMint: body.sellMint,
@@ -96,7 +92,7 @@ export const swapController = {
     }
 
     if (claim.kind === 'pending') {
-      const finished = await waitForPayout(db, body.depositSignature)
+      const finished = await waitForPayout(body.depositSignature)
       if (finished) {
         return {
           ok: true as const,
@@ -105,9 +101,10 @@ export const swapController = {
           replay: true as const,
         }
       }
-      throw new HTTPException(409, {
-        message: 'Swap already in progress for this deposit — wait a moment.',
-      })
+      throw new AppError(
+        409,
+        'Swap already in progress for this deposit — wait a moment.',
+      )
     }
 
     // We own the claim — only this request may mint.
@@ -117,10 +114,10 @@ export const swapController = {
       authority = loadSwapAuthority(env)
       connection = getConnection(env)
     } catch (error) {
-      await releaseClaim(db, body.depositSignature)
+      await releaseClaim(body.depositSignature)
       const message =
         error instanceof Error ? error.message : 'Swap not configured'
-      throw new HTTPException(503, { message })
+      throw new AppError(503, message)
     }
 
     try {
@@ -141,18 +138,20 @@ export const swapController = {
         buyMint: body.buyMint,
         sellAmount: actualSellUi,
       })
-      await db
-        .update(swapDeposits)
-        .set({
-          sellAmount: String(actualSellUi),
-          buyAmount: String(quote.buyAmount),
-        })
-        .where(eq(swapDeposits.signature, body.depositSignature))
+      await SwapDeposit.updateOne(
+        { signature: body.depositSignature },
+        {
+          $set: {
+            sellAmount: String(actualSellUi),
+            buyAmount: String(quote.buyAmount),
+          },
+        },
+      )
     } catch (error) {
-      await releaseClaim(db, body.depositSignature)
+      await releaseClaim(body.depositSignature)
       const message =
         error instanceof Error ? error.message : 'Deposit not confirmed'
-      throw new HTTPException(400, { message })
+      throw new AppError(400, message)
     }
 
     let payoutSignature: string
@@ -166,15 +165,15 @@ export const swapController = {
         decimals: buy.decimals,
       })
     } catch (error) {
-      await releaseClaim(db, body.depositSignature)
+      await releaseClaim(body.depositSignature)
       const message = error instanceof Error ? error.message : 'Payout failed'
-      throw new HTTPException(502, { message })
+      throw new AppError(502, message)
     }
 
-    await db
-      .update(swapDeposits)
-      .set({ payoutSignature })
-      .where(eq(swapDeposits.signature, body.depositSignature))
+    await SwapDeposit.updateOne(
+      { signature: body.depositSignature },
+      { $set: { payoutSignature } },
+    )
 
     return {
       ok: true as const,
@@ -187,9 +186,7 @@ export const swapController = {
   async faucet(env: Bindings, body: SwapFaucetBody) {
     const tokens = listConfiguredSwapTokens(env)
     if (tokens.length === 0) {
-      throw new HTTPException(503, {
-        message: 'No mock mints configured on the backend.',
-      })
+      throw new AppError(503, 'No mock mints configured on the backend.')
     }
 
     try {
@@ -204,7 +201,7 @@ export const swapController = {
       return { ok: true as const, signature }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Faucet failed'
-      throw new HTTPException(502, { message })
+      throw new AppError(502, message)
     }
   },
 }
@@ -218,24 +215,15 @@ type ClaimResult =
   | { kind: 'pending' }
   | { kind: 'claimed' }
 
-async function claimDepositSlot(
-  db: Db,
-  row: {
-    signature: string
-    userAddress: string
-    sellMint: string
-    buyMint: string
-    sellAmount: string
-    buyAmount: string
-  },
-): Promise<ClaimResult> {
-  const existing = await db
-    .select()
-    .from(swapDeposits)
-    .where(eq(swapDeposits.signature, row.signature))
-    .limit(1)
-
-  const found = existing[0]
+async function claimDepositSlot(row: {
+  signature: string
+  userAddress: string
+  sellMint: string
+  buyMint: string
+  sellAmount: string
+  buyAmount: string
+}): Promise<ClaimResult> {
+  const found = await SwapDeposit.findOne({ signature: row.signature }).lean()
   if (found?.payoutSignature) {
     return {
       kind: 'done',
@@ -248,7 +236,7 @@ async function claimDepositSlot(
   }
 
   try {
-    await db.insert(swapDeposits).values({
+    await SwapDeposit.create({
       signature: row.signature,
       userAddress: row.userAddress,
       sellMint: row.sellMint,
@@ -259,12 +247,9 @@ async function claimDepositSlot(
     })
     return { kind: 'claimed' }
   } catch {
-    const again = await db
-      .select()
-      .from(swapDeposits)
-      .where(eq(swapDeposits.signature, row.signature))
-      .limit(1)
-    const row2 = again[0]
+    const row2 = await SwapDeposit.findOne({
+      signature: row.signature,
+    }).lean()
     if (row2?.payoutSignature) {
       return {
         kind: 'done',
@@ -276,15 +261,10 @@ async function claimDepositSlot(
   }
 }
 
-async function waitForPayout(db: Db, signature: string) {
+async function waitForPayout(signature: string) {
   for (let i = 0; i < 40; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 250))
-    const rows = await db
-      .select()
-      .from(swapDeposits)
-      .where(eq(swapDeposits.signature, signature))
-      .limit(1)
-    const row = rows[0]
+    const row = await SwapDeposit.findOne({ signature }).lean()
     if (row?.payoutSignature) {
       return row
     }
@@ -293,6 +273,6 @@ async function waitForPayout(db: Db, signature: string) {
 }
 
 /** Allow a failed attempt to be retried safely. */
-async function releaseClaim(db: Db, signature: string) {
-  await db.delete(swapDeposits).where(eq(swapDeposits.signature, signature))
+async function releaseClaim(signature: string) {
+  await SwapDeposit.deleteOne({ signature })
 }

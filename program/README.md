@@ -1,20 +1,31 @@
 # Mera Portfolio Program
 
-Solana Anchor program for a **programmable portfolio vault** (mock tokenized stocks + mock USDC on **Devnet**).
+Solana Anchor program for a **programmable portfolio vault** (autopilot rules + keeper enforce).
 
 ## What it does
 
 - User-owned **Portfolio PDA** vault (no custodial private keys)
 - Deposit / withdraw any SPL / Token-2022 mint into vault ATAs
-- On-chain rules: `MinAllocation`, `MaxAllocation`, `TakeProfit` (extensible enum)
-- `enforce_rule` for keeper automation — on Devnet, empty `swap_ix_data` = condition check only (no Jupiter)
+- Up to **8 rules packed inside the Portfolio account** (no per-rule PDA → lower rent)
+- Rule kinds: `MinAllocation`, `MaxAllocation`, `TakeProfit`
+- `enforce_rule` for keeper automation — empty `swap_ix_data` = condition check only (Devnet); non-empty = Jupiter CPI
+
+## Instructions
+
+| Instruction | Purpose |
+|-------------|---------|
+| `initialize_portfolio` | Create Portfolio PDA (rules slots pre-allocated) |
+| `deposit` / `withdraw` | Move tokens into / out of vault ATAs |
+| `add_rule` / `remove_rule` | Write / clear a rule slot |
+| `set_portfolio_paused` | Pause or resume the whole portfolio |
+| `enforce_rule` | Keeper: check rule by id, optional swap |
 
 ## Layout
 
 ```
 program/
   programs/mera_portfolio/src/
-  scripts/setup-devnet-mints.sh
+  scripts/setup-devnet-mints.sh   # Devnet only
   Anchor.toml
   FEES.md
 ```
@@ -47,11 +58,17 @@ bash scripts/setup-devnet-mints.sh
 
 Paste the printed mints into `frontend/.env` (`VITE_USDC_MINT`, `VITE_NVDAX_MINT`).
 
-## Deploy (Devnet — free faucet SOL)
+**Mainnet:** do **not** run mint scripts. Use real USDC / tokenized-stock mint addresses and Jupiter liquidity.
+
+## Deploy
 
 ```bash
+# Devnet
 solana config set --url https://api.devnet.solana.com
 anchor deploy --provider.cluster devnet
+
+# Mainnet (real mints only — no mock scripts)
+# anchor deploy --provider.cluster mainnet
 ```
 
 Copy the program id into:
@@ -67,15 +84,10 @@ anchor test
 
 ## Fee costs
 
-See [FEES.md](./FEES.md).
+See [FEES.md](./FEES.md). Rent is dominated by **one Portfolio PDA + vault ATAs**, not N rule accounts.
 
 ## Status
 
-Hackathon target: **Devnet only**. Mock USDC / NVDAx; no Mainnet xStocks or Jupiter liquidity.
-
-Next on your machine:
-
-1. `bash scripts/setup-devnet-mints.sh`
-2. `anchor deploy --provider.cluster devnet`
-3. Put program id + mint ids in frontend/backend env
-4. Open `/vault` with a **Devnet** wallet
+- Program works with **any** mint pubkey (mock or real).
+- Mock mint scripts are **Devnet tooling only**.
+- Next: `anchor build` → deploy → set program id + mint ids in frontend/backend env.

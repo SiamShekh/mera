@@ -187,7 +187,22 @@ function toCompileResult(
 
 /** 7.10 — Compact preview card fields. */
 export function buildPreview(rule: CompiledRule): RulePreview {
-  if (rule.type === 'take_profit') {
+  if (rule.type === 'market_buy' || rule.type === 'limit_buy') {
+    return {
+      type: rule.type,
+      asset: rule.asset,
+      summary: interpretRule(rule),
+      fields: {
+        shares: rule.value,
+        payAsset: rule.payAsset,
+        ...(rule.type === 'limit_buy' && rule.limitPrice != null
+          ? { limitPrice: `$${rule.limitPrice}` }
+          : { price: 'market' }),
+      },
+    }
+  }
+
+  if (rule.type === 'take_profit' || rule.type === 'stop_loss') {
     return {
       type: rule.type,
       asset: rule.asset,

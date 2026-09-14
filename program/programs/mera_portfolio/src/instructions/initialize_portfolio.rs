@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::state::Portfolio;
+use crate::state::{Portfolio, RuleEntry, MAX_RULES};
 
 #[derive(Accounts)]
 pub struct InitializePortfolio<'info> {
@@ -25,10 +25,10 @@ pub fn handler(ctx: Context<InitializePortfolio>) -> Result<()> {
 
     portfolio.owner = ctx.accounts.owner.key();
     portfolio.bump = ctx.bumps.portfolio;
-    portfolio.rule_count = 0;
     portfolio.next_rule_id = 1;
     portfolio.paused = false;
     portfolio.created_at = clock.unix_timestamp;
+    portfolio.rules = [RuleEntry::default(); MAX_RULES];
 
     Ok(())
 }

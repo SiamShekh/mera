@@ -1,22 +1,21 @@
-import { Hono } from 'hono'
+import { Router } from 'express'
 
-import type { AppEnv } from '../types/env'
-import { ai } from './ai'
-import { health } from './health'
-import { keeper } from './keeper'
-import { prices } from './prices'
-import { rules } from './rules'
-import { swap } from './swap'
-import { users } from './users'
+import { aiRouter } from './ai'
+import { chatRouter } from './chat'
+import { healthRouter } from './health'
+import { keeperRouter } from './keeper'
+import { pricesRouter } from './prices'
+import { rulesRouter } from './rules'
+import { swapRouter } from './swap'
+import { usersRouter } from './users'
 
-const routes = new Hono<AppEnv>()
+export const routes = Router()
 
-routes.route('/health', health)
-routes.route('/users', users)
-routes.route('/rules', rules)
-routes.route('/ai', ai)
-routes.route('/keeper', keeper)
-routes.route('/swap', swap)
-routes.route('/prices', prices)
-
-export { routes }
+routes.use('/health', healthRouter)
+routes.use('/users', usersRouter)
+routes.use('/rules', rulesRouter)
+routes.use('/ai', aiRouter)
+routes.use('/chat', chatRouter)
+routes.use('/keeper', keeperRouter)
+routes.use('/swap', swapRouter)
+routes.use('/prices', pricesRouter)

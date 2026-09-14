@@ -4,8 +4,8 @@ use anchor_lang::prelude::*;
 pub enum PortfolioError {
     #[msg("Portfolio is paused")]
     PortfolioPaused,
-    #[msg("Rule is paused")]
-    RulePaused,
+    #[msg("Rule is not active")]
+    RuleInactive,
     #[msg("Unauthorized")]
     Unauthorized,
     #[msg("Amount must be greater than zero")]
@@ -22,4 +22,8 @@ pub enum PortfolioError {
     InvalidSwapProgram,
     #[msg("Swap execution failed")]
     SwapFailed,
+    #[msg("No free rule slots (max 8)")]
+    RuleSlotsFull,
+    #[msg("Rule not found")]
+    RuleNotFound,
 }

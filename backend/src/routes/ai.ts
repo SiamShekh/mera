@@ -1,9 +1,8 @@
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
+import { Router } from 'express'
 
 import { aiController } from '../controllers/ai.controller'
-import { createDb } from '../db'
-import type { AppEnv } from '../types/env'
+import { env } from '../config/env'
+import { zodValidate } from '../middleware/zodValidate'
 import { autopilotTurnBodySchema } from '../validators/autopilot'
 import { chatBodySchema } from '../validators/chat'
 import {
@@ -11,46 +10,90 @@ import {
   confirmRuleBodySchema,
   validateCompiledBodySchema,
 } from '../validators/compile'
+import type { AutopilotTurnBody } from '../validators/autopilot'
+import type { ChatBody } from '../validators/chat'
+import type {
+  CompilePromptBody,
+  ConfirmRuleBody,
+  ValidateCompiledBody,
+} from '../validators/compile'
 
-const ai = new Hono<AppEnv>()
+export const aiRouter = Router()
 
-/** 7.02 — Compile natural language into a strict rule preview (not saved yet). */
-ai.post('/compile', zValidator('json', compilePromptBodySchema), async (c) => {
-  const result = await aiController.compile(c.env, c.req.valid('json'))
-  return c.json(result, result.ok ? 200 : 422)
-})
+aiRouter.post(
+  '/compile',
+  zodValidate('body', compilePromptBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await aiController.compile(
+        env(),
+        req.validated!.body as CompilePromptBody,
+      )
+      res.status(result.ok ? 200 : 422).json(result)
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
-/** In-app Mera AI chat (product-scoped conversational assistant). */
-ai.post('/chat', zValidator('json', chatBodySchema), async (c) => {
-  const result = await aiController.chat(c.env, c.req.valid('json'))
-  return c.json(result)
-})
+aiRouter.post(
+  '/chat',
+  zodValidate('body', chatBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await aiController.chat(
+        env(),
+        req.validated!.body as ChatBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
-/** Autopilot brain: clarify → propose → confirm → execute intent. */
-ai.post(
+aiRouter.post(
   '/autopilot',
-  zValidator('json', autopilotTurnBodySchema),
-  async (c) => {
-    const result = await aiController.autopilotTurn(c.env, c.req.valid('json'))
-    return c.json(result)
+  zodValidate('body', autopilotTurnBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await aiController.autopilotTurn(
+        env(),
+        req.validated!.body as AutopilotTurnBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-/** 7.11 — Re-validate an edited draft rule + refresh interpretation/preview. */
-ai.post(
+aiRouter.post(
   '/validate',
-  zValidator('json', validateCompiledBodySchema),
-  async (c) => {
-    const result = aiController.validateEdit(c.req.valid('json'))
-    return c.json(result, result.ok ? 200 : 422)
+  zodValidate('body', validateCompiledBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = aiController.validateEdit(
+        req.validated!.body as ValidateCompiledBody,
+      )
+      res.status(result.ok ? 200 : 422).json(result)
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-/** 7.12–7.13 — Confirm and save the compiled rule. */
-ai.post('/confirm', zValidator('json', confirmRuleBodySchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const saved = await aiController.confirm(db, c.req.valid('json'))
-  return c.json(saved, 201)
-})
-
-export { ai }
+aiRouter.post(
+  '/confirm',
+  zodValidate('body', confirmRuleBodySchema),
+  async (req, res, next) => {
+    try {
+      const saved = await aiController.confirm(
+        req.validated!.body as ConfirmRuleBody,
+      )
+      res.status(201).json(saved)
+    } catch (error) {
+      next(error)
+    }
+  },
+)

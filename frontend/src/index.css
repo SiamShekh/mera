@@ -36,7 +36,7 @@
 
 :root {
   --radius: 0.9rem;
-  /* White Jupiter-like portfolio theme */
+  /* Light theme */
   --background: #ffffff;
   --foreground: #0a0a0a;
   --card: #f6f6f6;
@@ -58,6 +58,32 @@
   --input: #e8e8e8;
   --ring: #c8f542;
   --surface: #fafafa;
+  --lime: #c8f542;
+  --lime-foreground: #111111;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #141414;
+  --card-foreground: #fafafa;
+  --popover: #141414;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #0a0a0a;
+  --secondary: #1c1c1c;
+  --secondary-foreground: #fafafa;
+  --muted: #171717;
+  --muted-foreground: #a3a3a3;
+  --accent: #1c1c1c;
+  --accent-foreground: #fafafa;
+  --destructive: #f43f5e;
+  --destructive-foreground: #ffffff;
+  --positive: #22c55e;
+  --border: #262626;
+  --input: #262626;
+  --ring: #c8f542;
+  --surface: #111111;
   --lime: #c8f542;
   --lime-foreground: #111111;
 }

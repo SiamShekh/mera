@@ -13,6 +13,7 @@ import {
 } from '@solana/web3.js'
 import bs58 from 'bs58'
 
+import { XSTOCKS_CATALOG, XSTOCK_PRICES } from '../data/xstocks'
 import type { Bindings } from '../types/env'
 
 export type SwapToken = {
@@ -30,6 +31,18 @@ export const MOCK_SWAP_PRICES: Record<string, number> = {
   NVDAx: 120,
   SOLx: 150,
   stX: 165,
+  ...XSTOCK_PRICES,
+}
+
+function resolveLivePrice(
+  livePrices: Record<string, number> | undefined,
+  symbol: string,
+  mint?: string,
+  fallback?: number,
+): number {
+  if (livePrices?.[symbol] != null) return livePrices[symbol]
+  if (mint && livePrices?.[mint] != null) return livePrices[mint]
+  return fallback ?? MOCK_SWAP_PRICES[symbol] ?? 100
 }
 
 export function listConfiguredSwapTokens(
@@ -40,35 +53,53 @@ export function listConfiguredSwapTokens(
     {
       symbol: 'USDC',
       mint: env.MOCK_USDC_MINT,
-      priceUsd:
-        livePrices?.USDC ??
-        livePrices?.[env.MOCK_USDC_MINT ?? ''] ??
+      priceUsd: resolveLivePrice(
+        livePrices,
+        'USDC',
+        env.MOCK_USDC_MINT,
         MOCK_SWAP_PRICES.USDC,
+      ),
     },
     {
       symbol: 'NVDAx',
       mint: env.MOCK_NVDAX_MINT,
-      priceUsd:
-        livePrices?.NVDAx ??
-        livePrices?.[env.MOCK_NVDAX_MINT ?? ''] ??
+      priceUsd: resolveLivePrice(
+        livePrices,
+        'NVDAx',
+        env.MOCK_NVDAX_MINT,
         MOCK_SWAP_PRICES.NVDAx,
+      ),
     },
     {
       symbol: 'SOLx',
       mint: env.MOCK_SOLX_MINT,
-      priceUsd:
-        livePrices?.SOLx ??
-        livePrices?.[env.MOCK_SOLX_MINT ?? ''] ??
+      priceUsd: resolveLivePrice(
+        livePrices,
+        'SOLx',
+        env.MOCK_SOLX_MINT,
         MOCK_SWAP_PRICES.SOLx,
+      ),
     },
     {
       symbol: 'stX',
       mint: env.MOCK_STX_MINT,
-      priceUsd:
-        livePrices?.stX ??
-        livePrices?.[env.MOCK_STX_MINT ?? ''] ??
+      priceUsd: resolveLivePrice(
+        livePrices,
+        'stX',
+        env.MOCK_STX_MINT,
         MOCK_SWAP_PRICES.stX,
+      ),
     },
+    ...XSTOCKS_CATALOG.map((stock) => ({
+      symbol: stock.symbol,
+      mint: stock.mint,
+      priceUsd: resolveLivePrice(
+        livePrices,
+        stock.symbol,
+        stock.mint,
+        stock.priceUsd,
+      ),
+    })),
   ]
 
   return rows
@@ -475,6 +506,7 @@ export async function payoutBuyTokens(options: {
 
 /**
  * Optional demo faucet — mint a starter bag + drip Devnet SOL for fees.
+ * Batches into multiple txs (token ATA + mintTo pairs blow the size limit).
  */
 export async function faucetMockTokens(options: {
   connection: Connection
@@ -490,49 +522,75 @@ export async function faucetMockTokens(options: {
     NVDAx: 5,
     SOLx: 2,
     stX: 2,
+    ...Object.fromEntries(
+      XSTOCKS_CATALOG.map((row) => [row.symbol, row.faucetAmount]),
+    ),
   }
 
   /** Enough for several deposit txs; skip if wallet already funded. */
   const FAUCET_SOL_LAMPORTS = 50_000_000 // 0.05 SOL
   const MIN_SOL_LAMPORTS = 10_000_000 // 0.01 SOL
+  const TOKENS_PER_TX = 4
   const solBalance = await options.connection.getBalance(user)
   const needsSol = solBalance < MIN_SOL_LAMPORTS
 
-  return sendAuthorityTx(options.connection, options.authority, () => {
-    const tx = new Transaction()
-    if (needsSol) {
-      tx.add(
-        SystemProgram.transfer({
-          fromPubkey: authority,
-          toPubkey: user,
-          lamports: FAUCET_SOL_LAMPORTS,
-        }),
-      )
-    }
-    for (const token of options.tokens) {
-      const ui = amounts[token.symbol] ?? 1
-      const raw = BigInt(Math.round(ui * 10 ** token.decimals))
-      const mint = new PublicKey(token.mint)
-      const userAta = getAssociatedTokenAddressSync(mint, user)
-      tx.add(
-        createAssociatedTokenAccountIdempotentInstruction(
-          authority,
-          userAta,
-          user,
-          mint,
-        ),
-        createMintToInstruction(
-          mint,
-          userAta,
-          authority,
-          raw,
-          [],
-          TOKEN_PROGRAM_ID,
-        ),
-      )
-    }
-    return tx
-  })
+  const signatures: string[] = []
+
+  if (needsSol) {
+    const solSig = await sendAuthorityTx(
+      options.connection,
+      options.authority,
+      () => {
+        const tx = new Transaction()
+        tx.add(
+          SystemProgram.transfer({
+            fromPubkey: authority,
+            toPubkey: user,
+            lamports: FAUCET_SOL_LAMPORTS,
+          }),
+        )
+        return tx
+      },
+    )
+    signatures.push(solSig)
+  }
+
+  for (let i = 0; i < options.tokens.length; i += TOKENS_PER_TX) {
+    const batch = options.tokens.slice(i, i + TOKENS_PER_TX)
+    const sig = await sendAuthorityTx(
+      options.connection,
+      options.authority,
+      () => {
+        const tx = new Transaction()
+        for (const token of batch) {
+          const ui = amounts[token.symbol] ?? 1
+          const raw = BigInt(Math.round(ui * 10 ** token.decimals))
+          const mint = new PublicKey(token.mint)
+          const userAta = getAssociatedTokenAddressSync(mint, user)
+          tx.add(
+            createAssociatedTokenAccountIdempotentInstruction(
+              authority,
+              userAta,
+              user,
+              mint,
+            ),
+            createMintToInstruction(
+              mint,
+              userAta,
+              authority,
+              raw,
+              [],
+              TOKEN_PROGRAM_ID,
+            ),
+          )
+        }
+        return tx
+      },
+    )
+    signatures.push(sig)
+  }
+
+  return signatures[signatures.length - 1] ?? signatures[0]
 }
 
 function roundAmount(value: number, decimals: number): number {

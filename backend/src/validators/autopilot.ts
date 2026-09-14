@@ -25,6 +25,7 @@ export const autopilotTurnBodySchema = z.object({
     .optional(),
   walletConnected: z.boolean().optional(),
   pendingRule: compiledRuleSchema.optional().nullable(),
+  pendingRules: z.array(compiledRuleSchema).max(20).optional().nullable(),
 })
 
 export type AutopilotTurnBody = z.infer<typeof autopilotTurnBodySchema>

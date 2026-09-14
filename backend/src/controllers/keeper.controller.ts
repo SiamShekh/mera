@@ -1,11 +1,16 @@
-import { eq } from 'drizzle-orm'
-import { HTTPException } from 'hono/http-exception'
-
-import type { Db } from '../db'
-import { schema } from '../db'
+import { AppError } from '../errors'
 import {
+  Portfolio,
+  RuleModel,
+  User,
+  type Rule,
+} from '../models'
+import { leanRequired } from '../models/lean'
+import {
+  executeArmedBuy,
   executeArmedSell,
   executePaperSell,
+  executeSizedPaperSell,
   type AutopilotExecution,
 } from '../solana/autopilotSell'
 import { listConfiguredSwapTokens } from '../solana/mockSwap'
@@ -46,87 +51,86 @@ type HoldingRow = {
 
 /**
  * Keeper evaluates active rules against the live mock price book.
- * When dryRun=false, triggered take-profit sells execute via Autopilot.
+ * When dryRun=false: take-profit / stop-loss fills, and allocation rebalances → USDC.
  */
 export const keeperController = {
-  async linkPortfolio(db: Db, body: LinkPortfolioBody) {
-    const user = await db.query.users.findFirst({
-      where: (fields, { eq: eqFn }) => eqFn(fields.address, body.userAddress),
-    })
+  async linkPortfolio(body: LinkPortfolioBody) {
+    const user = await User.findOne({ address: body.userAddress }).lean()
     if (!user) {
-      throw new HTTPException(404, { message: 'User not found' })
+      throw new AppError(404, 'User not found')
     }
 
     const now = new Date().toISOString()
-    await db
-      .insert(schema.portfolios)
-      .values({
-        userAddress: body.userAddress,
-        portfolioPda: body.portfolioPda,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: schema.portfolios.userAddress,
-        set: {
+    await Portfolio.findOneAndUpdate(
+      { userAddress: body.userAddress },
+      {
+        $set: {
           portfolioPda: body.portfolioPda,
           updatedAt: now,
         },
-      })
+        $setOnInsert: {
+          userAddress: body.userAddress,
+          createdAt: now,
+        },
+      },
+      { upsert: true },
+    )
 
     return { ok: true as const, portfolioPda: body.portfolioPda }
   },
 
-  async linkRule(db: Db, body: LinkRuleBody) {
-    const existing = await db.query.rules.findFirst({
-      where: (fields, { eq: eqFn }) => eqFn(fields.id, body.ruleId),
-    })
+  async linkRule(body: LinkRuleBody) {
+    const existing = await RuleModel.findOne({ id: body.ruleId }).lean()
     if (!existing) {
-      throw new HTTPException(404, { message: 'Rule not found' })
+      throw new AppError(404, 'Rule not found')
     }
 
-    await db
-      .update(schema.rules)
-      .set({
-        mint: body.mint,
-        portfolioPda: body.portfolioPda,
-        onChainRulePda: body.onChainRulePda,
-        onChainRuleId: body.onChainRuleId,
-        onChainStatus: 'active',
-        status: 'active',
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.rules.id, body.ruleId))
+    await RuleModel.updateOne(
+      { id: body.ruleId },
+      {
+        $set: {
+          mint: body.mint,
+          portfolioPda: body.portfolioPda,
+          onChainRulePda: body.onChainRulePda,
+          onChainRuleId: body.onChainRuleId,
+          onChainStatus: 'active',
+          status: 'active',
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    )
 
-    return this.getRule(db, body.ruleId)
+    return this.getRule(body.ruleId)
   },
 
   /**
    * Arm Autopilot after the user deposits sell tokens to treasury (one wallet sign).
    * If the price condition is already true, settles immediately.
    */
-  async armAutopilot(db: Db, env: Bindings, body: ArmAutopilotBody) {
-    const rule = await this.getRule(db, body.ruleId)
+  async armAutopilot(env: Bindings, body: ArmAutopilotBody) {
+    const rule = await this.getRule(body.ruleId)
     if (rule.userAddress !== body.userAddress) {
-      throw new HTTPException(403, { message: 'Rule belongs to another wallet' })
+      throw new AppError(403, 'Rule belongs to another wallet')
     }
     if (rule.status !== 'active' && !rule.executedAt) {
-      throw new HTTPException(400, { message: 'Rule is not active' })
+      throw new AppError(400, 'Rule is not active')
     }
 
     const now = new Date().toISOString()
-    await db
-      .update(schema.rules)
-      .set({
-        mint: body.sellMint,
-        escrowSellAmount: body.sellAmount,
-        escrowDepositSig: body.depositSignature,
-        updatedAt: now,
-      })
-      .where(eq(schema.rules.id, body.ruleId))
+    await RuleModel.updateOne(
+      { id: body.ruleId },
+      {
+        $set: {
+          mint: body.sellMint,
+          escrowSellAmount: body.sellAmount,
+          escrowDepositSig: body.depositSignature,
+          updatedAt: now,
+        },
+      },
+    )
 
-    const armed = await this.getRule(db, body.ruleId)
-    const priceMap = await getPriceMap(db, env)
+    const armed = await this.getRule(body.ruleId)
+    const priceMap = await getPriceMap(env)
     const tokens = listConfiguredSwapTokens(env, priceMap)
     const holdings = await fetchWalletHoldings(
       env,
@@ -146,11 +150,15 @@ export const keeperController = {
     )
 
     if (evalResult?.triggered) {
-      const execution = await executeArmedSell(db, env, armed)
+      const isBuy =
+        armed.type === 'market_buy' || armed.type === 'limit_buy'
+      const execution = isBuy
+        ? await executeArmedBuy(env, armed)
+        : await executeArmedSell(env, armed)
       return {
         armed: true as const,
         settledNow: true as const,
-        rule: await this.getRule(db, body.ruleId),
+        rule: await this.getRule(body.ruleId),
         execution,
         reason: evalResult.reason,
       }
@@ -167,34 +175,26 @@ export const keeperController = {
     }
   },
 
-  async getRule(db: Db, id: string) {
-    const rule = await db.query.rules.findFirst({
-      where: (fields, { eq: eqFn }) => eqFn(fields.id, id),
-    })
+  async getRule(id: string): Promise<Rule> {
+    const rule = await RuleModel.findOne({ id })
     if (!rule) {
-      throw new HTTPException(404, { message: 'Rule not found' })
+      throw new AppError(404, 'Rule not found')
     }
-    return rule
+    return leanRequired<Rule>(rule)
   },
 
-  async tick(
-    db: Db,
-    env: Bindings,
-    body: KeeperTickBody,
-  ): Promise<KeeperTickResult> {
-    const book = await ensureFresh(db, env)
-    const priceMap = await getPriceMap(db, env)
+  async tick(env: Bindings, body: KeeperTickBody): Promise<KeeperTickResult> {
+    const book = await ensureFresh(env)
+    const priceMap = await getPriceMap(env)
     const tokens = listConfiguredSwapTokens(env, priceMap)
 
-    const rows = await db.query.rules.findMany({
-      where: (fields, { eq: eqFn, and: andFn }) =>
-        body.userAddress
-          ? andFn(
-              eqFn(fields.status, 'active'),
-              eqFn(fields.userAddress, body.userAddress),
-            )
-          : eqFn(fields.status, 'active'),
-    })
+    const filter: Record<string, unknown> = { status: 'active' }
+    if (body.userAddress) {
+      filter.userAddress = body.userAddress
+    }
+    const rows = (await RuleModel.find(filter).lean()).map((row) =>
+      leanRequired<Rule>(row),
+    )
 
     const holdingsByUser = new Map<string, HoldingRow[]>()
     async function holdingsFor(userAddress: string) {
@@ -214,7 +214,8 @@ export const keeperController = {
     const executions: AutopilotExecution[] = []
     let skipped = 0
 
-    const canExecute = Boolean(env.SWAP_AUTHORITY_SECRET) && Boolean(env.SOLANA_RPC_URL)
+    const canExecute =
+      Boolean(env.SWAP_AUTHORITY_SECRET) && Boolean(env.SOLANA_RPC_URL)
     const dryRun = body.dryRun === true || !canExecute
 
     for (const rule of rows) {
@@ -241,13 +242,68 @@ export const keeperController = {
         ...evalResult,
       })
 
-      if (!dryRun && evalResult.triggered && rule.type === 'take_profit') {
+      if (!dryRun && evalResult.triggered) {
         try {
-          if (rule.escrowDepositSig && rule.escrowSellAmount && rule.mint) {
-            executions.push(await executeArmedSell(db, env, rule))
-          } else {
-            // Still try paper fill so Autopilot does something without escrow
-            executions.push(await executePaperSell(db, env, rule, holdings))
+          if (rule.type === 'take_profit' || rule.type === 'stop_loss') {
+            if (rule.escrowDepositSig && rule.escrowSellAmount && rule.mint) {
+              executions.push(await executeArmedSell(env, rule))
+            } else {
+              executions.push(await executePaperSell(env, rule, holdings))
+            }
+          } else if (rule.type === 'market_buy' || rule.type === 'limit_buy') {
+            if (rule.escrowDepositSig && rule.escrowSellAmount && rule.mint) {
+              executions.push(await executeArmedBuy(env, rule))
+            } else {
+              executions.push({
+                ruleId: rule.id,
+                asset: rule.asset,
+                soldAmount: 0,
+                buyAmount: 0,
+                buySymbol: rule.asset,
+                txid: null,
+                note: 'Buy triggered but not armed — waiting for pay-asset escrow from chat.',
+              })
+            }
+          } else if (rule.type === 'max_allocation') {
+            const trim = computeMaxAllocationTrim(
+              rule,
+              holdings,
+              portfolioValueUsd,
+              priceMap,
+            )
+            if (trim) {
+              executions.push(
+                await executeSizedPaperSell(env, {
+                  rule,
+                  sellAsset: trim.symbol,
+                  sellMint: trim.mint,
+                  sellAmount: trim.sellAmount,
+                  keepActive: rule.unit === 'percent',
+                  notePrefix: 'Allocation trim',
+                }),
+              )
+            }
+          } else if (
+            rule.type === 'min_allocation' &&
+            rule.asset.toUpperCase() === 'USDC'
+          ) {
+            const raise = computeUsdcFloorRaise(
+              rule,
+              holdings,
+              portfolioValueUsd,
+            )
+            if (raise) {
+              executions.push(
+                await executeSizedPaperSell(env, {
+                  rule,
+                  sellAsset: raise.symbol,
+                  sellMint: raise.mint,
+                  sellAmount: raise.sellAmount,
+                  keepActive: true,
+                  notePrefix: 'Cash floor raise',
+                }),
+              )
+            }
           }
         } catch (error) {
           const message =
@@ -295,6 +351,8 @@ function evaluateRule(
     unit: string
     value: number
     mint: string | null
+    limitPrice?: number | null
+    payAsset?: string | null
   },
   holdings: HoldingRow[],
   portfolioValueUsd: number,
@@ -316,8 +374,37 @@ function evaluateRule(
 
   const livePrice = resolveLivePrice(priceMap, rule.asset, rule.mint)
 
-  if (rule.type === 'take_profit') {
-    // Demo entry = anchor-like: profit vs "would be" at static anchor if we have price
+  if (rule.type === 'market_buy' || rule.type === 'limit_buy') {
+    // Always price the buy target (asset), never the pay mint stored on arm.
+    const buyPrice = resolveLivePrice(priceMap, rule.asset, null)
+    if (!buyPrice) {
+      return {
+        triggered: false,
+        reason: `No live mock price for ${rule.asset}`,
+      }
+    }
+    if (rule.type === 'market_buy') {
+      return {
+        triggered: true,
+        assetValueUsd: holding?.valueUsd,
+        portfolioValueUsd,
+        reason: `${rule.asset} market buy — execute now (live $${buyPrice.toFixed(2)})`,
+      }
+    }
+    const limit = rule.limitPrice ?? 0
+    const triggered = limit > 0 && buyPrice <= limit
+    return {
+      triggered,
+      assetValueUsd: holding?.valueUsd,
+      portfolioValueUsd,
+      reason: triggered
+        ? `${rule.asset} at $${buyPrice.toFixed(2)} ≤ $${limit} — limit buy`
+        : `${rule.asset} at $${buyPrice.toFixed(2)} — waiting for ≤ $${limit}`,
+    }
+  }
+
+  if (rule.type === 'take_profit' || rule.type === 'stop_loss') {
+    // Demo entry = anchor-like: profit/loss vs static anchor if we have price
     const anchor =
       rule.asset.toUpperCase() === 'USDC'
         ? 1
@@ -336,6 +423,31 @@ function evaluateRule(
       }
     }
     const threshold = rule.value
+
+    if (rule.type === 'stop_loss') {
+      if (rule.unit === 'amount') {
+        const triggered = livePrice <= threshold
+        return {
+          triggered,
+          assetValueUsd: holding?.valueUsd,
+          portfolioValueUsd,
+          reason: triggered
+            ? `${rule.asset} at $${livePrice.toFixed(2)} ≤ $${threshold} — stop-loss sell`
+            : `${rule.asset} at $${livePrice.toFixed(2)} — stop-loss waiting for ≤ $${threshold}`,
+        }
+      }
+      const lossPercent = ((anchor - livePrice) / anchor) * 100
+      const triggered = lossPercent >= threshold
+      return {
+        triggered,
+        profitPercent: Math.round(-lossPercent * 100) / 100,
+        assetValueUsd: holding?.valueUsd,
+        portfolioValueUsd,
+        reason: triggered
+          ? `${rule.asset} −${lossPercent.toFixed(1)}% vs anchor (stop-loss ${threshold}%)`
+          : `${rule.asset} at −${lossPercent.toFixed(1)}% — above stop-loss ${threshold}%`,
+      }
+    }
 
     // Absolute USD price trigger (unit=amount). value <= 0 = market sell now.
     if (rule.unit === 'amount') {
@@ -408,6 +520,68 @@ function evaluateRule(
   }
 
   return null
+}
+
+function computeMaxAllocationTrim(
+  rule: { asset: string; unit: string; value: number; mint: string | null },
+  holdings: HoldingRow[],
+  portfolioValueUsd: number,
+  priceMap: Record<string, number>,
+): { symbol: string; mint: string; sellAmount: number } | null {
+  const holding =
+    holdings.find(
+      (row) =>
+        row.symbol.toUpperCase() === rule.asset.toUpperCase() ||
+        (rule.mint && row.mint === rule.mint) ||
+        aliasesMatch(row.symbol, rule.asset),
+    ) ?? null
+  if (!holding || !(holding.quantity > 0) || portfolioValueUsd <= 0) return null
+
+  const assetValueUsd = holding.valueUsd
+  const targetUsd =
+    rule.unit === 'percent'
+      ? (portfolioValueUsd * rule.value) / 100
+      : rule.value
+  const excessUsd = assetValueUsd - targetUsd
+  if (!(excessUsd > 0)) return null
+
+  const price =
+    holding.quantity > 0
+      ? holding.valueUsd / holding.quantity
+      : resolveLivePrice(priceMap, rule.asset, rule.mint)
+  if (!(price && price > 0)) return null
+
+  const sellAmount = Math.min(holding.quantity, excessUsd / price)
+  if (!(sellAmount > 0)) return null
+  return { symbol: holding.symbol, mint: holding.mint, sellAmount }
+}
+
+function computeUsdcFloorRaise(
+  rule: { unit: string; value: number },
+  holdings: HoldingRow[],
+  portfolioValueUsd: number,
+): { symbol: string; mint: string; sellAmount: number } | null {
+  const usdc =
+    holdings.find((row) => row.symbol.toUpperCase() === 'USDC') ?? null
+  const usdcUsd = usdc?.valueUsd ?? 0
+  const targetUsd =
+    rule.unit === 'percent'
+      ? (portfolioValueUsd * rule.value) / 100
+      : rule.value
+  const deficitUsd = targetUsd - usdcUsd
+  if (!(deficitUsd > 0)) return null
+
+  const candidates = holdings
+    .filter((row) => row.symbol.toUpperCase() !== 'USDC' && row.quantity > 0)
+    .sort((a, b) => b.valueUsd - a.valueUsd)
+  const source = candidates[0]
+  if (!source) return null
+
+  const price = source.valueUsd / source.quantity
+  if (!(price > 0)) return null
+  const sellAmount = Math.min(source.quantity, deficitUsd / price)
+  if (!(sellAmount > 0)) return null
+  return { symbol: source.symbol, mint: source.mint, sellAmount }
 }
 
 function synthesizeDemoHoldings(

@@ -4,7 +4,7 @@ use anchor_lang::solana_program::program::invoke_signed;
 use anchor_spl::token_interface::{TokenAccount, TokenInterface};
 
 use crate::errors::PortfolioError;
-use crate::state::{Portfolio, Rule, RuleType, RuleUnit};
+use crate::state::{Portfolio, RuleEntry, RuleType, RuleUnit};
 
 /// Optional Mainnet Jupiter v6 id — unused on Devnet (mock / empty swap path).
 #[allow(dead_code)]
@@ -13,7 +13,9 @@ pub const JUPITER_V6_PROGRAM_ID: Pubkey =
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct EnforceArgs {
-    /// Current USD value of `rule.mint` holdings in the vault (6 decimals, USDC-style).
+    /// Rule id packed inside the Portfolio account.
+    pub rule_id: u8,
+    /// Current USD value of the rule mint holdings in the vault (6 decimals).
     pub asset_value_usd: u64,
     /// Current USD value of the whole vault (6 decimals).
     pub portfolio_value_usd: u64,
@@ -36,22 +38,9 @@ pub struct EnforceRule<'info> {
     )]
     pub portfolio: Account<'info, Portfolio>,
 
-    #[account(
-        seeds = [
-            Rule::SEED,
-            portfolio.key().as_ref(),
-            &rule.rule_id.to_le_bytes()
-        ],
-        bump = rule.bump,
-        has_one = portfolio @ PortfolioError::Unauthorized,
-        constraint = !rule.paused @ PortfolioError::RulePaused
-    )]
-    pub rule: Account<'info, Rule>,
-
-    /// Vault ATA for the rule mint (used for allocation checks / swap source).
+    /// Vault ATA for the rule mint (mint checked in handler after resolving rule).
     #[account(
         mut,
-        token::mint = rule.mint,
         token::authority = portfolio,
         token::token_program = token_program
     )]
@@ -65,8 +54,20 @@ pub struct EnforceRule<'info> {
 }
 
 pub fn handler(ctx: Context<EnforceRule>, args: EnforceArgs) -> Result<()> {
-    let rule = &ctx.accounts.rule;
-    let should_swap = condition_met(rule, &args)?;
+    let slot = ctx
+        .accounts
+        .portfolio
+        .find_rule_slot(args.rule_id)
+        .ok_or(PortfolioError::RuleNotFound)?;
+    let rule = ctx.accounts.portfolio.rules[slot];
+    require!(rule.active, PortfolioError::RuleInactive);
+
+    require!(
+        ctx.accounts.vault_asset_ata.mint == rule.mint,
+        PortfolioError::Unauthorized
+    );
+
+    let should_swap = condition_met(&rule, &args)?;
     require!(should_swap, PortfolioError::ConditionNotMet);
 
     // Devnet hackathon path: prove the rule fired without requiring Jupiter liquidity.
@@ -80,7 +81,11 @@ pub fn handler(ctx: Context<EnforceRule>, args: EnforceArgs) -> Result<()> {
     );
 
     let owner = ctx.accounts.portfolio.owner;
-    let seeds: &[&[u8]] = &[Portfolio::SEED, owner.as_ref(), &[ctx.accounts.portfolio.bump]];
+    let seeds: &[&[u8]] = &[
+        Portfolio::SEED,
+        owner.as_ref(),
+        &[ctx.accounts.portfolio.bump],
+    ];
     let signer_seeds = &[seeds];
 
     let mut account_metas: Vec<AccountMeta> = Vec::with_capacity(ctx.remaining_accounts.len());
@@ -111,7 +116,7 @@ pub fn handler(ctx: Context<EnforceRule>, args: EnforceArgs) -> Result<()> {
     Ok(())
 }
 
-fn condition_met(rule: &Rule, args: &EnforceArgs) -> Result<bool> {
+fn condition_met(rule: &RuleEntry, args: &EnforceArgs) -> Result<bool> {
     require!(args.portfolio_value_usd > 0, PortfolioError::InvalidAmount);
 
     match rule.rule_type {

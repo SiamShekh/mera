@@ -42,7 +42,7 @@ async function resolveLlm(
     return {
       ok: false,
       reason:
-        'OPENAI_API_KEY is missing. Add it to backend/.dev.vars (recommended OPENAI_MODEL=gpt-5.6-luna) and restart wrangler.',
+        'OPENAI_API_KEY is missing. Add it to backend/.env (recommended OPENAI_MODEL=gpt-5.6-luna) and restart the server.',
     }
   }
 

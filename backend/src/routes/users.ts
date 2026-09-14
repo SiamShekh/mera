@@ -1,49 +1,53 @@
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
+import { Router } from 'express'
 
-import { createDb, schema } from '../db'
-import type { AppEnv } from '../types/env'
+import { User } from '../models'
+import { zodValidate } from '../middleware/zodValidate'
 import {
   createUserBodySchema,
   userAddressParamSchema,
 } from '../validators/user'
 
-const users = new Hono<AppEnv>()
+export const usersRouter = Router()
 
-/** Upsert user when a Solana wallet connects. Body: { address } */
-users.post('/', zValidator('json', createUserBodySchema), async (c) => {
-  const { address } = c.req.valid('json')
-  const db = createDb(c.env.DB)
-
-  await db
-    .insert(schema.users)
-    .values({ address })
-    .onConflictDoNothing({ target: schema.users.address })
-
-  const user = await db.query.users.findFirst({
-    where: (fields, { eq }) => eq(fields.address, address),
-  })
-
-  return c.json({ user }, 201)
-})
-
-users.get(
-  '/:address',
-  zValidator('param', userAddressParamSchema),
-  async (c) => {
-    const { address } = c.req.valid('param')
-    const db = createDb(c.env.DB)
-
-    const user = await db.query.users.findFirst({
-      where: (fields, { eq }) => eq(fields.address, address),
-    })
-
-    if (!user) {
-      return c.json({ error: 'User not found' }, 404)
+usersRouter.post(
+  '/',
+  zodValidate('body', createUserBodySchema),
+  async (req, res, next) => {
+    try {
+      const { address } = req.validated!.body as { address: string }
+      await User.updateOne(
+        { address },
+        { $setOnInsert: { address, createdAt: new Date().toISOString() } },
+        { upsert: true },
+      )
+      const user = await User.findOne({ address }).lean()
+      res.status(201).json({
+        user: user
+          ? { address: user.address, createdAt: user.createdAt }
+          : { address, createdAt: new Date().toISOString() },
+      })
+    } catch (error) {
+      next(error)
     }
-
-    return c.json({ user })
   },
 )
 
-export { users }
+usersRouter.get(
+  '/:address',
+  zodValidate('params', userAddressParamSchema),
+  async (req, res, next) => {
+    try {
+      const { address } = req.validated!.params as { address: string }
+      const user = await User.findOne({ address }).lean()
+      if (!user) {
+        res.status(404).json({ error: 'User not found' })
+        return
+      }
+      res.json({
+        user: { address: user.address, createdAt: user.createdAt },
+      })
+    } catch (error) {
+      next(error)
+    }
+  },
+)

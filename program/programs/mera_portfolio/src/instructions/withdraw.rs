@@ -15,7 +15,8 @@ pub struct Withdraw<'info> {
     #[account(
         seeds = [Portfolio::SEED, owner.key().as_ref()],
         bump = portfolio.bump,
-        has_one = owner @ PortfolioError::Unauthorized
+        has_one = owner @ PortfolioError::Unauthorized,
+        constraint = !portfolio.paused @ PortfolioError::PortfolioPaused
     )]
     pub portfolio: Account<'info, Portfolio>,
 

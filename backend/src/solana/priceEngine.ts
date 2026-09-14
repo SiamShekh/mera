@@ -1,8 +1,6 @@
-import { desc, eq } from 'drizzle-orm'
-
-import type { Db } from '../db'
-import { mockPrices, priceTicks } from '../db/schema'
-import type { Bindings } from '../types/env'
+import { XSTOCKS_CATALOG, XSTOCK_PRICES } from '../data/xstocks'
+import type { Env } from '../config/env'
+import { MockPrice, PriceTick } from '../models'
 
 const TICK_INTERVAL_MS = 15_000
 const MAX_TICKS_PER_MINT = 120
@@ -41,15 +39,20 @@ const ANCHORS: Record<string, number> = {
   NVDAx: 120,
   SOLx: 150,
   stX: 165,
+  ...XSTOCK_PRICES,
 }
 
-/** Assets to simulate from env mint bindings. */
-export function seedAssetsFromEnv(env: Bindings): PriceAssetSeed[] {
+/** Assets to simulate from env mint bindings + xStock catalog. */
+export function seedAssetsFromEnv(env: Env): PriceAssetSeed[] {
   const rows: Array<{ symbol: string; mint?: string; pegged?: boolean }> = [
     { symbol: 'USDC', mint: env.MOCK_USDC_MINT, pegged: true },
     { symbol: 'NVDAx', mint: env.MOCK_NVDAX_MINT },
     { symbol: 'SOLx', mint: env.MOCK_SOLX_MINT },
     { symbol: 'stX', mint: env.MOCK_STX_MINT },
+    ...XSTOCKS_CATALOG.map((stock) => ({
+      symbol: stock.symbol,
+      mint: stock.mint,
+    })),
   ]
   return rows
     .filter((row) => row.mint && row.mint.length >= 32)
@@ -100,7 +103,6 @@ export function nextSimulatedPrice(
   const rand = mulberry32(hashSeed(mint, unixMinute))
   const u1 = Math.max(1e-9, rand())
   const u2 = rand()
-  // Box–Muller → approx N(0,1)
   const gaussian = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)
 
   const fatTail = rand() < 0.1
@@ -108,7 +110,6 @@ export function nextSimulatedPrice(
     ? (rand() < 0.5 ? -1 : 1) * (0.04 + rand() * 0.08)
     : gaussian * 0.009
 
-  // Clip normal / fat separately
   if (!fatTail) {
     const mag = Math.min(0.015, Math.max(0.003, Math.abs(ret)))
     ret = Math.sign(ret || 1) * mag * (0.5 + rand())
@@ -116,7 +117,6 @@ export function nextSimulatedPrice(
     ret = Math.max(-0.12, Math.min(0.12, ret))
   }
 
-  // Mean reversion toward anchor
   const drift = ((anchor - current) / anchor) * 0.08
   let next = current * (1 + ret + drift)
 
@@ -124,19 +124,18 @@ export function nextSimulatedPrice(
   const hi = anchor * 2.5
   next = Math.max(lo, Math.min(hi, next))
 
-  // Keep readable precision
   next = Math.round(next * 1e6) / 1e6
   const changePct = current > 0 ? ((next - current) / current) * 100 : 0
   return { price: next, changePct: Math.round(changePct * 100) / 100 }
 }
 
-export async function ensureSeeded(db: Db, env: Bindings): Promise<void> {
+export async function ensureSeeded(env: Env): Promise<void> {
   const assets = seedAssetsFromEnv(env)
   if (assets.length === 0) {
     return
   }
 
-  const existing = await db.select().from(mockPrices)
+  const existing = await MockPrice.find({}).select('mint').lean()
   const byMint = new Set(existing.map((row) => row.mint))
   const now = new Date().toISOString()
 
@@ -144,14 +143,14 @@ export async function ensureSeeded(db: Db, env: Bindings): Promise<void> {
     if (byMint.has(asset.mint)) {
       continue
     }
-    await db.insert(mockPrices).values({
+    await MockPrice.create({
       mint: asset.mint,
       symbol: asset.symbol,
       priceUsd: asset.anchorUsd,
       anchorUsd: asset.anchorUsd,
       updatedAt: now,
     })
-    await db.insert(priceTicks).values({
+    await PriceTick.create({
       id: crypto.randomUUID(),
       mint: asset.mint,
       priceUsd: asset.anchorUsd,
@@ -161,29 +160,26 @@ export async function ensureSeeded(db: Db, env: Bindings): Promise<void> {
   }
 }
 
-async function pruneTicks(db: Db, mint: string): Promise<void> {
-  const rows = await db
-    .select({ id: priceTicks.id })
-    .from(priceTicks)
-    .where(eq(priceTicks.mint, mint))
-    .orderBy(desc(priceTicks.createdAt))
+async function pruneTicks(mint: string): Promise<void> {
+  const rows = await PriceTick.find({ mint })
+    .sort({ createdAt: -1 })
+    .select('id')
+    .lean()
 
   const drop = rows.slice(MAX_TICKS_PER_MINT)
-  for (const row of drop) {
-    await db.delete(priceTicks).where(eq(priceTicks.id, row.id))
-  }
+  if (drop.length === 0) return
+  await PriceTick.deleteMany({ id: { $in: drop.map((row) => row.id) } })
 }
 
 /** Advance all assets by one minute bar. */
 export async function stepAll(
-  db: Db,
-  env: Bindings,
+  env: Env,
   minuteOffset = 0,
 ): Promise<PriceBook> {
-  await ensureSeeded(db, env)
+  await ensureSeeded(env)
   const assets = seedAssetsFromEnv(env)
   const peggedByMint = new Map(assets.map((a) => [a.mint, Boolean(a.pegged)]))
-  const rows = await db.select().from(mockPrices)
+  const rows = await MockPrice.find({}).lean()
   const unixMinute = Math.floor(Date.now() / TICK_INTERVAL_MS) - minuteOffset
   const now = new Date().toISOString()
 
@@ -195,30 +191,30 @@ export async function stepAll(
       unixMinute,
       peggedByMint.get(row.mint) ?? row.symbol === 'USDC',
     )
-    await db
-      .update(mockPrices)
-      .set({ priceUsd: price, updatedAt: now })
-      .where(eq(mockPrices.mint, row.mint))
-    await db.insert(priceTicks).values({
+    await MockPrice.updateOne(
+      { mint: row.mint },
+      { $set: { priceUsd: price, updatedAt: now } },
+    )
+    await PriceTick.create({
       id: crypto.randomUUID(),
       mint: row.mint,
       priceUsd: price,
       changePct,
       createdAt: now,
     })
-    await pruneTicks(db, row.mint)
+    await pruneTicks(row.mint)
   }
 
-  return getPriceBook(db)
+  return getPriceBook()
 }
 
 /**
- * If last update older than ~60s, step once (local wrangler + API consumers).
- * Catch up at most a few missed minutes so cold starts don’t jump wildly.
+ * If last update older than tick interval, step once.
+ * Catch up at most a few missed bars so cold starts don’t jump wildly.
  */
-export async function ensureFresh(db: Db, env: Bindings): Promise<PriceBook> {
-  await ensureSeeded(db, env)
-  const rows = await db.select().from(mockPrices)
+export async function ensureFresh(env: Env): Promise<PriceBook> {
+  await ensureSeeded(env)
+  const rows = await MockPrice.find({}).lean()
   if (rows.length === 0) {
     return { updatedAt: null, prices: [], ticks: [] }
   }
@@ -230,32 +226,30 @@ export async function ensureFresh(db: Db, env: Bindings): Promise<PriceBook> {
 
   const age = Date.now() - newest
   if (age < TICK_INTERVAL_MS) {
-    return getPriceBook(db)
+    return getPriceBook()
   }
 
   const missed = Math.min(5, Math.max(1, Math.floor(age / TICK_INTERVAL_MS)))
-  let book = await getPriceBook(db)
+  let book = await getPriceBook()
   for (let i = missed - 1; i >= 0; i -= 1) {
-    book = await stepAll(db, env, i)
+    book = await stepAll(env, i)
   }
   return book
 }
 
-export async function getPriceBook(db: Db): Promise<PriceBook> {
-  const rows = await db.select().from(mockPrices)
+export async function getPriceBook(): Promise<PriceBook> {
+  const rows = await MockPrice.find({}).lean()
   if (rows.length === 0) {
     return { updatedAt: null, prices: [], ticks: [] }
   }
 
-  const tickRows = await db
-    .select()
-    .from(priceTicks)
-    .orderBy(desc(priceTicks.createdAt))
+  const tickRows = await PriceTick.find({})
+    .sort({ createdAt: -1 })
     .limit(80)
+    .lean()
 
   const symbolByMint = new Map(rows.map((r) => [r.mint, r.symbol]))
 
-  // changePct vs previous tick for each mint
   const latestChange = new Map<string, number>()
   for (const tick of tickRows) {
     if (!latestChange.has(tick.mint)) {
@@ -292,11 +286,8 @@ export async function getPriceBook(db: Db): Promise<PriceBook> {
 }
 
 /** Map mint → live USD (for swap / portfolio / keeper). */
-export async function getPriceMap(
-  db: Db,
-  env: Bindings,
-): Promise<Record<string, number>> {
-  const book = await ensureFresh(db, env)
+export async function getPriceMap(env: Env): Promise<Record<string, number>> {
+  const book = await ensureFresh(env)
   const map: Record<string, number> = {}
   for (const row of book.prices) {
     map[row.mint] = row.priceUsd

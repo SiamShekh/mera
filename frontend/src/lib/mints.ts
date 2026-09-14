@@ -1,10 +1,15 @@
 import { TOKEN_ICONS } from '@/lib/tokenIcons'
+import {
+  XSTOCKS_CATALOG,
+  XSTOCK_BY_SYMBOL,
+  XSTOCK_PRICES,
+} from '@/data/xstocks'
 
 /**
  * Devnet mock mints for the hackathon.
  *
- * Create them with: `cd program && bash scripts/setup-devnet-mints.sh`
- * Then paste the printed addresses into `frontend/.env`.
+ * Core mints: `cd program && bash scripts/setup-devnet-mints.sh`
+ * Extra xStocks: `cd program && bash scripts/add-xstock-mints.sh`
  */
 
 /** Placeholder until you run the setup script — deposit/resolve will fail until set. */
@@ -26,6 +31,12 @@ export const MOCK_USD_PRICES: Record<string, number> = {
   ...(NVDAX_MINT !== PLACEHOLDER ? { [NVDAX_MINT]: 120 } : {}),
   ...(SOLX_MINT !== PLACEHOLDER ? { [SOLX_MINT]: 150 } : {}),
   ...(STX_MINT !== PLACEHOLDER ? { [STX_MINT]: 165 } : {}),
+  ...Object.fromEntries(
+    XSTOCKS_CATALOG.filter((row) => row.mint.length >= 32).map((row) => [
+      row.mint,
+      row.priceUsd,
+    ]),
+  ),
 }
 
 export const MINTS = {
@@ -35,6 +46,7 @@ export const MINTS = {
   SOLx: SOLX_MINT,
   NVDAx: NVDAX_MINT,
   stX: STX_MINT,
+  ...Object.fromEntries(XSTOCKS_CATALOG.map((row) => [row.symbol, row.mint])),
 } as const
 
 export type SwapAsset = {
@@ -76,8 +88,15 @@ export function listSwapAssets(): SwapAsset[] {
       priceUsd: 120,
       icon: TOKEN_ICONS.NVDAx,
     },
+    ...XSTOCKS_CATALOG.map((row) => ({
+      symbol: row.symbol,
+      mint: row.mint,
+      decimals: row.decimals,
+      priceUsd: row.priceUsd,
+      icon: row.icon,
+    })),
   ]
-  return rows.filter((row) => row.mint !== PLACEHOLDER)
+  return rows.filter((row) => row.mint !== PLACEHOLDER && row.mint.length >= 32)
 }
 
 export function quoteMockSwap(
@@ -106,7 +125,13 @@ export function resolveMint(asset: string): string | null {
     NVDAX: MINTS.NVDAx,
     STX: MINTS.stX,
   }
-  return map[key] ?? null
+  for (const stock of XSTOCKS_CATALOG) {
+    map[stock.symbol.toUpperCase()] = stock.mint
+    if (stock.underlying) {
+      map[stock.underlying.toUpperCase()] = stock.mint
+    }
+  }
+  return map[key] ?? XSTOCK_BY_SYMBOL[asset.trim()]?.mint ?? null
 }
 
 export function mintsConfigured(): boolean {
@@ -116,3 +141,5 @@ export function mintsConfigured(): boolean {
 export function swapMintsConfigured(): boolean {
   return listSwapAssets().length >= 2
 }
+
+export { XSTOCK_PRICES }

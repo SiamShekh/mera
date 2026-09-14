@@ -90,9 +90,9 @@ const allocationSchema = z
     }
   })
 
-const takeProfitSchema = z
+const sellSideSchema = z
   .object({
-    type: z.literal('take_profit'),
+    type: z.enum(['take_profit', 'stop_loss']),
     userAddress: solanaAddressSchema,
     prompt: z.string().trim().min(1).optional(),
     asset: assetSchema,
@@ -104,6 +104,14 @@ const takeProfitSchema = z
     status: z.enum(['draft', 'active', 'paused']).default('active'),
   })
   .superRefine((data, ctx) => {
+    if (data.type === 'stop_loss' && data.unit === 'amount' && !(data.value > 0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message: 'Stop-loss price must be greater than 0',
+      })
+    }
+
     const trigger = thresholdSchema.safeParse({
       unit: data.unit,
       value: data.value,
@@ -125,10 +133,33 @@ const takeProfitSchema = z
     }
   })
 
-/** Union of the three rule shapes (A/B allocation + C take-profit). */
+const buySideSchema = z
+  .object({
+    type: z.enum(['market_buy', 'limit_buy']),
+    userAddress: solanaAddressSchema,
+    prompt: z.string().trim().min(1).optional(),
+    asset: assetSchema,
+    unit: z.literal('amount'),
+    value: z.number().positive(),
+    payAsset: assetSchema,
+    limitPrice: z.number().positive().optional().nullable(),
+    status: z.enum(['draft', 'active', 'paused']).default('active'),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === 'limit_buy' && !(data.limitPrice != null && data.limitPrice > 0)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['limitPrice'],
+        message: 'Limit buy needs a USD limit price',
+      })
+    }
+  })
+
+/** Union of allocation guards + sell/buy orders. */
 export const createRuleBodySchema = z.union([
   allocationSchema,
-  takeProfitSchema,
+  sellSideSchema,
+  buySideSchema,
 ])
 
 export const listRulesQuerySchema = z.object({
@@ -150,6 +181,8 @@ export const updateRuleBodySchema = z
     actionUnit: unitSchema.optional(),
     actionValue: z.number().optional(),
     sellBasis: z.enum(['position', 'portfolio']).optional(),
+    payAsset: assetSchema.optional(),
+    limitPrice: z.number().positive().nullable().optional(),
   })
   .refine(
     (body) =>
@@ -160,7 +193,9 @@ export const updateRuleBodySchema = z
       body.value !== undefined ||
       body.actionUnit !== undefined ||
       body.actionValue !== undefined ||
-      body.sellBasis !== undefined,
+      body.sellBasis !== undefined ||
+      body.payAsset !== undefined ||
+      body.limitPrice !== undefined,
     { message: 'Provide at least one field to update' },
   )
   .superRefine((body, ctx) => {

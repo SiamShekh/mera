@@ -1,52 +1,81 @@
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
+import { Router } from 'express'
 
+import { env } from '../config/env'
 import { keeperController } from '../controllers/keeper.controller'
-import { createDb } from '../db'
-import type { AppEnv } from '../types/env'
+import { zodValidate } from '../middleware/zodValidate'
 import {
   armAutopilotBodySchema,
   keeperTickBodySchema,
   linkPortfolioBodySchema,
   linkRuleBodySchema,
 } from '../validators/keeper'
+import type {
+  ArmAutopilotBody,
+  KeeperTickBody,
+  LinkPortfolioBody,
+  LinkRuleBody,
+} from '../validators/keeper'
 
-const keeper = new Hono<AppEnv>()
+export const keeperRouter = Router()
 
-keeper.post('/tick', zValidator('json', keeperTickBodySchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const result = await keeperController.tick(db, c.env, c.req.valid('json'))
-  return c.json(result)
-})
+keeperRouter.post(
+  '/tick',
+  zodValidate('body', keeperTickBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await keeperController.tick(
+        env(),
+        req.validated!.body as KeeperTickBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
-keeper.post(
+keeperRouter.post(
   '/arm',
-  zValidator('json', armAutopilotBodySchema),
-  async (c) => {
-    const db = createDb(c.env.DB)
-    const result = await keeperController.armAutopilot(
-      db,
-      c.env,
-      c.req.valid('json'),
-    )
-    return c.json(result)
+  zodValidate('body', armAutopilotBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await keeperController.armAutopilot(
+        env(),
+        req.validated!.body as ArmAutopilotBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-keeper.post(
+keeperRouter.post(
   '/portfolio',
-  zValidator('json', linkPortfolioBodySchema),
-  async (c) => {
-    const db = createDb(c.env.DB)
-    const result = await keeperController.linkPortfolio(db, c.req.valid('json'))
-    return c.json(result)
+  zodValidate('body', linkPortfolioBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await keeperController.linkPortfolio(
+        req.validated!.body as LinkPortfolioBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-keeper.post('/link-rule', zValidator('json', linkRuleBodySchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const rule = await keeperController.linkRule(db, c.req.valid('json'))
-  return c.json({ rule })
-})
-
-export { keeper }
+keeperRouter.post(
+  '/link-rule',
+  zodValidate('body', linkRuleBodySchema),
+  async (req, res, next) => {
+    try {
+      const rule = await keeperController.linkRule(
+        req.validated!.body as LinkRuleBody,
+      )
+      res.json({ rule })
+    } catch (error) {
+      next(error)
+    }
+  },
+)

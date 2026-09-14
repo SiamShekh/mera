@@ -5,7 +5,7 @@ import { WalletPanel } from '@/components/wallet/WalletPanel'
 export function PortfolioPage() {
   return (
     <div className="space-y-8">
-      <VaultAutopilotPanel />
+      {/* <VaultAutopilotPanel /> */}
       <WalletPanel />
     </div>
   )

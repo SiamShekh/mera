@@ -83,9 +83,9 @@ const minAllocationCompiled = z
     }
   })
 
-const takeProfitCompiled = z
+const sellSideCompiled = z
   .object({
-    type: z.literal('take_profit'),
+    type: z.enum(['take_profit', 'stop_loss']),
     asset: assetField,
     unit: unitSchema,
     value: z.number(),
@@ -94,9 +94,16 @@ const takeProfitCompiled = z
     sellBasis: z.enum(['position', 'portfolio']).default('position'),
   })
   .superRefine((data, ctx) => {
-    // Absolute price: value >= 0 (0 = market / sell now). Profit-%: value > 0 and <= 100.
+    // Absolute price: value >= 0 (0 = market / sell now for take_profit).
+    // stop_loss amount must be > 0 (a floor price). Profit/loss %: value > 0 and <= 100.
     if (data.unit === 'amount') {
-      if (data.value < 0) {
+      if (data.type === 'stop_loss' && !(data.value > 0)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['value'],
+          message: 'Stop-loss price must be greater than 0',
+        })
+      } else if (data.value < 0) {
         ctx.addIssue({
           code: 'custom',
           path: ['value'],
@@ -126,11 +133,59 @@ const takeProfitCompiled = z
     }
   })
 
+const buySideCompiled = z
+  .object({
+    type: z.enum(['market_buy', 'limit_buy']),
+    asset: assetField,
+    unit: z.literal('amount'),
+    /** Share / token quantity to buy. */
+    value: z.number().positive(),
+    payAsset: assetField,
+    /** Required for limit_buy; ignored / null for market_buy. */
+    limitPrice: z.number().positive().optional().nullable(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.type === 'limit_buy') {
+      if (!(data.limitPrice != null && data.limitPrice > 0)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['limitPrice'],
+          message: 'Limit buy needs a USD limit price',
+        })
+      }
+    }
+  })
+
 export const compiledRuleSchema = z.union([
   maxAllocationCompiled,
   minAllocationCompiled,
-  takeProfitCompiled,
+  sellSideCompiled,
+  buySideCompiled,
 ])
+
+/** Sell-side rules that escrow the asset and fill into USDC. */
+export function isSellSideRule(
+  rule: CompiledRule,
+): rule is Extract<CompiledRule, { type: 'take_profit' | 'stop_loss' }> {
+  return rule.type === 'take_profit' || rule.type === 'stop_loss'
+}
+
+/** Buy-side rules that escrow payAsset and fill into the target asset. */
+export function isBuySideRule(
+  rule: CompiledRule,
+): rule is Extract<CompiledRule, { type: 'market_buy' | 'limit_buy' }> {
+  return rule.type === 'market_buy' || rule.type === 'limit_buy'
+}
+
+/** Rules that need wallet escrow before the keeper can fill. */
+export function isEscrowRule(
+  rule: CompiledRule,
+): rule is Extract<
+  CompiledRule,
+  { type: 'take_profit' | 'stop_loss' | 'market_buy' | 'limit_buy' }
+> {
+  return isSellSideRule(rule) || isBuySideRule(rule)
+}
 
 export const compiledRejectionSchema = z.object({
   rejection: z.object({

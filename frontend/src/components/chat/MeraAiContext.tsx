@@ -25,13 +25,23 @@ type MeraAiContextValue = {
 
 const MeraAiContext = createContext<MeraAiContextValue | null>(null)
 
+const DESKTOP_CHAT_MQ = '(min-width: 1024px)'
+
+function getInitialChatOpen() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  // Desktop: open as a layout column. Mobile: stay closed until AI Chat is tapped.
+  return window.matchMedia(DESKTOP_CHAT_MQ).matches
+}
+
 /**
  * Opens the Mera AI panel from anywhere (sidebar, Autopilot button, etc.).
- * Chat starts open as a layout column; closing expands the main area.
- * Reopen anytime via the sidebar "AI Chat" item.
+ * On desktop, chat starts open as a layout column; closing expands the main area.
+ * On mobile, chat stays closed until opened from the side menu "AI Chat" item.
  */
 export function MeraAiProvider({ children }: { children: ReactNode }) {
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useState(getInitialChatOpen)
   const [draftPrefill, setDraftPrefill] = useState<string | null>(null)
   const [intent, setIntent] = useState<'autopilot' | null>(null)
 

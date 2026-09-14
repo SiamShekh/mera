@@ -4,6 +4,8 @@
  * Callers may also pass live `holdings` as soft hints for the LLM.
  */
 
+import { XSTOCKS_CATALOG } from '../data/xstocks'
+
 export type AssetAlias = {
   symbol: string
   aliases: string[]
@@ -35,6 +37,22 @@ export const ASSET_ALIASES: AssetAlias[] = [
   },
   { symbol: 'SOLx', aliases: ['solx', 'sol stock', 'tokenized sol'] },
   { symbol: 'stX', aliases: ['stx', 'stock x'] },
+  ...XSTOCKS_CATALOG.map((row) => {
+    const base = row.underlying.toLowerCase()
+    const name = row.name.replace(/\s+xStock$/i, '').toLowerCase()
+    return {
+      symbol: row.symbol,
+      aliases: [
+        base,
+        row.symbol.toLowerCase(),
+        name,
+        `${name} stock`,
+        `${name} xstock`,
+        `${base} stock`,
+        `${base} xstock`,
+      ].filter(Boolean),
+    }
+  }),
 ]
 
 const TICKER_RE = /^[A-Za-z][A-Za-z0-9._-]{0,31}$/

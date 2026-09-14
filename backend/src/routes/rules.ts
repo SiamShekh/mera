@@ -1,55 +1,93 @@
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
+import { Router } from 'express'
 
 import { rulesController } from '../controllers/rules.controller'
-import { createDb } from '../db'
-import type { AppEnv } from '../types/env'
+import { zodValidate } from '../middleware/zodValidate'
 import {
   createRuleBodySchema,
   listRulesQuerySchema,
   ruleIdParamSchema,
   updateRuleBodySchema,
 } from '../validators/rule'
+import type {
+  CreateRuleBody,
+  ListRulesQuery,
+  UpdateRuleBody,
+} from '../validators/rule'
 
-const rules = new Hono<AppEnv>()
+export const rulesRouter = Router()
 
-rules.post('/', zValidator('json', createRuleBodySchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const rule = await rulesController.create(db, c.req.valid('json'))
-  return c.json({ rule }, 201)
-})
-
-rules.get('/', zValidator('query', listRulesQuerySchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const rows = await rulesController.list(db, c.req.valid('query'))
-  return c.json({ rules: rows })
-})
-
-rules.get('/:id', zValidator('param', ruleIdParamSchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const rule = await rulesController.getById(db, c.req.valid('param').id)
-  return c.json({ rule })
-})
-
-rules.patch(
-  '/:id',
-  zValidator('param', ruleIdParamSchema),
-  zValidator('json', updateRuleBodySchema),
-  async (c) => {
-    const db = createDb(c.env.DB)
-    const rule = await rulesController.update(
-      db,
-      c.req.valid('param').id,
-      c.req.valid('json'),
-    )
-    return c.json({ rule })
+rulesRouter.post(
+  '/',
+  zodValidate('body', createRuleBodySchema),
+  async (req, res, next) => {
+    try {
+      const rule = await rulesController.create(
+        req.validated!.body as CreateRuleBody,
+      )
+      res.status(201).json({ rule })
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-rules.delete('/:id', zValidator('param', ruleIdParamSchema), async (c) => {
-  const db = createDb(c.env.DB)
-  const result = await rulesController.remove(db, c.req.valid('param').id)
-  return c.json(result)
-})
+rulesRouter.get(
+  '/',
+  zodValidate('query', listRulesQuerySchema),
+  async (req, res, next) => {
+    try {
+      const rows = await rulesController.list(
+        req.validated!.query as ListRulesQuery,
+      )
+      res.json({ rules: rows })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
 
-export { rules }
+rulesRouter.get(
+  '/:id',
+  zodValidate('params', ruleIdParamSchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.validated!.params as { id: string }
+      const rule = await rulesController.getById(id)
+      res.json({ rule })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+rulesRouter.patch(
+  '/:id',
+  zodValidate('params', ruleIdParamSchema),
+  zodValidate('body', updateRuleBodySchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.validated!.params as { id: string }
+      const rule = await rulesController.update(
+        id,
+        req.validated!.body as UpdateRuleBody,
+      )
+      res.json({ rule })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+rulesRouter.delete(
+  '/:id',
+  zodValidate('params', ruleIdParamSchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.validated!.params as { id: string }
+      const result = await rulesController.remove(id)
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
+  },
+)

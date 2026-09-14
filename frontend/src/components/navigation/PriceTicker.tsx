@@ -9,9 +9,12 @@ type PriceTickerProps = {
 }
 
 const FALLBACK = [
-  { symbol: 'SOLx', priceUsd: 150, changePct: 0 },
-  { symbol: 'stX', priceUsd: 165, changePct: 0 },
+  { symbol: 'TSLAx', priceUsd: 363.92, changePct: 0 },
+  { symbol: 'AAPLx', priceUsd: 334.71, changePct: 0 },
+  { symbol: 'GOOGLx', priceUsd: 345, changePct: 0 },
   { symbol: 'NVDAx', priceUsd: 120, changePct: 0 },
+  { symbol: 'MSFTx', priceUsd: 504.34, changePct: 0 },
+  { symbol: 'SPYx', priceUsd: 761.33, changePct: 0 },
   { symbol: 'USDC', priceUsd: 1, changePct: 0 },
 ] as const
 
@@ -26,13 +29,10 @@ function formatTickerPrice(symbol: string, price: number): string {
 }
 
 /**
- * Horizontal price strip fed by the backend mock oracle (polls ~10s).
+ * Horizontal price strip fed by the mock oracle (Socket.io + initial REST).
  */
 export function PriceTicker({ className }: PriceTickerProps) {
-  const { data } = useGetPricesQuery(undefined, {
-    pollingInterval: 10_000,
-    refetchOnFocus: true,
-  })
+  const { data } = useGetPricesQuery()
 
   const items =
     data?.prices?.length && data.prices.length > 0

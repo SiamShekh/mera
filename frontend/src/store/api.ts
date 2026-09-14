@@ -5,13 +5,17 @@ import type {
   ArmAutopilotResponse,
   AutopilotTurnRequest,
   AutopilotTurnResult,
+  AppendChatMessageResponse,
   ChatRequest,
   ChatResult,
   CompiledRule,
   CompileResult,
   ConfirmRuleResponse,
+  CreateChatThreadResponse,
   CreateRuleBody,
+  GetChatThreadResponse,
   KeeperTickResponse,
+  ListChatThreadsResponse,
   PriceBook,
   Rule,
   RuleStatus,
@@ -26,7 +30,7 @@ import type {
 export const api = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({ baseUrl: API_URL }),
-  tagTypes: ['Rules'],
+  tagTypes: ['Rules', 'ChatThreads'],
   endpoints: (builder) => ({
     upsertUser: builder.mutation<UpsertUserResponse, { address: string }>({
       query: (body) => ({
@@ -124,6 +128,73 @@ export const api = createApi({
       }),
     }),
 
+    listChatThreads: builder.query<
+      ListChatThreadsResponse,
+      { userAddress: string }
+    >({
+      query: ({ userAddress }) => ({
+        url: '/chat/threads',
+        params: { userAddress },
+      }),
+      providesTags: ['ChatThreads'],
+    }),
+
+    getChatThread: builder.query<
+      GetChatThreadResponse,
+      { id: string; userAddress: string }
+    >({
+      query: ({ id, userAddress }) => ({
+        url: `/chat/threads/${id}`,
+        params: { userAddress },
+      }),
+      providesTags: (_result, _err, arg) => [
+        { type: 'ChatThreads', id: arg.id },
+      ],
+    }),
+
+    createChatThread: builder.mutation<
+      CreateChatThreadResponse,
+      { userAddress: string; title?: string }
+    >({
+      query: (body) => ({
+        url: '/chat/threads',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['ChatThreads'],
+    }),
+
+    appendChatMessage: builder.mutation<
+      AppendChatMessageResponse,
+      {
+        threadId: string
+        userAddress: string
+        role: 'user' | 'assistant'
+        content: string
+        id?: string
+        title?: string
+      }
+    >({
+      query: ({ threadId, ...body }) => ({
+        url: `/chat/threads/${threadId}/messages`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['ChatThreads'],
+    }),
+
+    deleteChatThread: builder.mutation<
+      { ok: boolean },
+      { id: string; userAddress: string }
+    >({
+      query: ({ id, userAddress }) => ({
+        url: `/chat/threads/${id}`,
+        method: 'DELETE',
+        params: { userAddress },
+      }),
+      invalidatesTags: ['ChatThreads'],
+    }),
+
     swapConfig: builder.query<SwapConfigResponse, void>({
       query: () => ({ url: '/swap/config' }),
     }),
@@ -199,6 +270,12 @@ export const {
   useConfirmRuleMutation,
   useChatMutation,
   useAutopilotTurnMutation,
+  useListChatThreadsQuery,
+  useLazyListChatThreadsQuery,
+  useLazyGetChatThreadQuery,
+  useCreateChatThreadMutation,
+  useAppendChatMessageMutation,
+  useDeleteChatThreadMutation,
   useSwapConfigQuery,
   useCompleteSwapMutation,
   useSwapFaucetMutation,

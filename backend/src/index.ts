@@ -1,33 +1,26 @@
+import { createServer } from 'node:http'
+
 import { createApp } from './app'
-import { createDb } from './db'
-import { keeperController } from './controllers/keeper.controller'
-import { ensureFresh } from './solana/priceEngine'
-import type { Bindings } from './types/env'
+import { env } from './config/env'
+import { connectMongo } from './db/connect'
+import { attachRealtime } from './realtime/io'
 
-/**
- * Cloudflare Workers entry.
- * Local: `npm run dev` (Wrangler + local D1 SQLite)
- * Deploy: `npm run deploy`
- */
-const app = createApp()
+async function main() {
+  const config = env()
+  await connectMongo(config.MONGODB_URI)
 
-const worker = {
-  fetch: app.fetch.bind(app),
+  const app = createApp()
+  const httpServer = createServer(app)
+  attachRealtime(httpServer)
 
-  /** Advance mock prices + settle Autopilot sells every cron minute. */
-  async scheduled(
-    _controller: ScheduledController,
-    env: Bindings,
-    ctx: ExecutionContext,
-  ) {
-    ctx.waitUntil(
-      (async () => {
-        const db = createDb(env.DB)
-        await ensureFresh(db, env)
-        await keeperController.tick(db, env, { dryRun: false })
-      })(),
+  httpServer.listen(config.PORT, () => {
+    console.log(
+      `[mera] Express + Socket.io on :${config.PORT} (${config.ENVIRONMENT})`,
     )
-  },
+  })
 }
 
-export default worker
+main().catch((error) => {
+  console.error('[mera] failed to start', error)
+  process.exit(1)
+})

@@ -28,23 +28,15 @@ pub mod mera_portfolio {
         instructions::add_rule::handler(ctx, args)
     }
 
-    pub fn pause_rule(ctx: Context<PauseRule>) -> Result<()> {
-        instructions::pause_rule::handler(ctx, true)
+    pub fn remove_rule(ctx: Context<RemoveRule>, rule_id: u8) -> Result<()> {
+        instructions::remove_rule::handler(ctx, rule_id)
     }
 
-    pub fn resume_rule(ctx: Context<PauseRule>) -> Result<()> {
-        instructions::pause_rule::handler(ctx, false)
+    pub fn set_portfolio_paused(ctx: Context<SetPortfolioPaused>, paused: bool) -> Result<()> {
+        instructions::set_portfolio_paused::handler(ctx, paused)
     }
 
-    pub fn pause_portfolio(ctx: Context<PausePortfolio>) -> Result<()> {
-        instructions::pause_portfolio::handler(ctx, true)
-    }
-
-    pub fn resume_portfolio(ctx: Context<PausePortfolio>) -> Result<()> {
-        instructions::pause_portfolio::handler(ctx, false)
-    }
-
-    /// Keeper-callable: re-check rule, then optionally execute a Jupiter swap
+    /// Keeper-callable: re-check rule by id, then optionally execute a Jupiter swap
     /// via remaining_accounts (vault PDA signs with seeds).
     pub fn enforce_rule(ctx: Context<EnforceRule>, args: EnforceArgs) -> Result<()> {
         instructions::enforce_rule::handler(ctx, args)

@@ -6,15 +6,13 @@ import { useClient } from '@solana/react'
 import { useState } from 'react'
 
 import { ActivityPanel } from '@/components/ActivityPanel'
-import { AirdropPanel } from '@/components/AirdropPanel'
-import { BackendHealthPanel } from '@/components/BackendHealthPanel'
 import { HoldingsList } from '@/components/HoldingsList'
 import { NETWORK_LABEL } from '@/lib/config'
 import { shortenAddress } from '@/lib/format'
 import type { AppClient } from '@/lib/solanaClient'
 import { cn } from '@/lib/utils'
 
-const TABS = ['Positions', 'Spot', 'Activity', 'Airdrop'] as const
+const TABS = ['Positions', 'Spot', 'Activity'] as const
 type TabId = (typeof TABS)[number]
 
 /**
@@ -97,13 +95,8 @@ export function WalletPanel() {
           {activeTab === 'Activity' ? (
             <ActivityPanel ownerAddress={owner} />
           ) : null}
-          {activeTab === 'Airdrop' ? <AirdropPanel /> : null}
         </>
       )}
-
-      <div className="opacity-70 lg:max-w-md">
-        <BackendHealthPanel />
-      </div>
     </div>
   )
 }

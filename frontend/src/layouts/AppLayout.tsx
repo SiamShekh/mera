@@ -7,7 +7,7 @@ import { DesktopTopBar } from '@/components/navigation/DesktopTopBar'
 import { MobileBottomNav } from '@/components/navigation/MobileBottomNav'
 import { MobileTopBar } from '@/components/navigation/MobileTopBar'
 import { PriceTicker } from '@/components/navigation/PriceTicker'
-import { AutopilotWatcher } from '@/components/vault/AutopilotWatcher'
+import { RealtimeBridge } from '@/components/realtime/RealtimeBridge'
 import { SyncUserOnConnect } from '@/components/wallet/SyncUserOnConnect'
 
 /**
@@ -21,7 +21,7 @@ export function AppLayout() {
     <MeraAiProvider>
       <div className="min-h-svh bg-background lg:flex lg:h-svh lg:overflow-hidden">
         <SyncUserOnConnect />
-        <AutopilotWatcher />
+        <RealtimeBridge />
         <DesktopSidebar />
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:overflow-y-auto">

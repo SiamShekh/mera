@@ -1,6 +1,12 @@
 export type RuleUnit = 'percent' | 'amount'
 export type RuleStatus = 'draft' | 'active' | 'paused'
-export type RuleType = 'max_allocation' | 'min_allocation' | 'take_profit'
+export type RuleType =
+  | 'max_allocation'
+  | 'min_allocation'
+  | 'take_profit'
+  | 'stop_loss'
+  | 'market_buy'
+  | 'limit_buy'
 
 export type User = {
   address: string
@@ -22,6 +28,8 @@ export type Rule = {
   actionUnit: RuleUnit | null
   actionValue: number | null
   sellBasis: 'position' | 'portfolio' | null
+  payAsset?: string | null
+  limitPrice?: number | null
   status: RuleStatus
   createdAt: string
   updatedAt: string
@@ -38,7 +46,7 @@ export type CreateRuleBody =
       status?: RuleStatus
     }
   | {
-      type: 'take_profit'
+      type: 'take_profit' | 'stop_loss'
       userAddress: string
       asset: string
       unit: RuleUnit
@@ -46,6 +54,17 @@ export type CreateRuleBody =
       actionUnit: RuleUnit
       actionValue: number
       sellBasis?: 'position' | 'portfolio'
+      prompt?: string
+      status?: RuleStatus
+    }
+  | {
+      type: 'market_buy' | 'limit_buy'
+      userAddress: string
+      asset: string
+      unit: 'amount'
+      value: number
+      payAsset: string
+      limitPrice?: number | null
       prompt?: string
       status?: RuleStatus
     }
@@ -58,7 +77,7 @@ export type CompiledRule =
       value: number
     }
   | {
-      type: 'take_profit'
+      type: 'take_profit' | 'stop_loss'
       asset: string
       unit: RuleUnit
       value: number
@@ -66,6 +85,35 @@ export type CompiledRule =
       actionValue: number
       sellBasis: 'position' | 'portfolio'
     }
+  | {
+      type: 'market_buy' | 'limit_buy'
+      asset: string
+      unit: 'amount'
+      value: number
+      payAsset: string
+      limitPrice?: number | null
+    }
+
+export function isSellSideRule(
+  rule: CompiledRule,
+): rule is Extract<CompiledRule, { type: 'take_profit' | 'stop_loss' }> {
+  return rule.type === 'take_profit' || rule.type === 'stop_loss'
+}
+
+export function isBuySideRule(
+  rule: CompiledRule,
+): rule is Extract<CompiledRule, { type: 'market_buy' | 'limit_buy' }> {
+  return rule.type === 'market_buy' || rule.type === 'limit_buy'
+}
+
+export function isEscrowRule(
+  rule: CompiledRule,
+): rule is Extract<
+  CompiledRule,
+  { type: 'take_profit' | 'stop_loss' | 'market_buy' | 'limit_buy' }
+> {
+  return isSellSideRule(rule) || isBuySideRule(rule)
+}
 
 export type RulePreview = {
   type: RuleType
@@ -126,6 +174,7 @@ export type AutopilotTurnRequest = {
   holdings?: Array<{ symbol: string; quantity: number; priceUsd: number }>
   walletConnected?: boolean
   pendingRule?: CompiledRule | null
+  pendingRules?: CompiledRule[] | null
 }
 
 export type AutopilotTurnResult =
@@ -134,6 +183,7 @@ export type AutopilotTurnResult =
       kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute'
       reply: string
       rule: CompiledRule | null
+      rules?: CompiledRule[]
       interpretation: string | null
       provider: 'openai'
     }
@@ -248,4 +298,44 @@ export type ArmAutopilotResponse = {
     note: string
   } | null
   rule: Rule
+}
+
+export type PersistedChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt?: string
+}
+
+export type PersistedChatThread = {
+  id: string
+  title: string
+  updatedAt: string
+  createdAt: string
+  messages: PersistedChatMessage[]
+}
+
+export type ChatThreadSummary = {
+  id: string
+  title: string
+  updatedAt: string
+  createdAt: string
+  preview: string | null
+}
+
+export type ListChatThreadsResponse = {
+  threads: ChatThreadSummary[]
+}
+
+export type GetChatThreadResponse = {
+  thread: PersistedChatThread
+}
+
+export type CreateChatThreadResponse = {
+  thread: PersistedChatThread
+}
+
+export type AppendChatMessageResponse = {
+  message: PersistedChatMessage
+  thread: Omit<PersistedChatThread, 'messages'>
 }

@@ -1,17 +1,41 @@
-import type { MiddlewareHandler } from 'hono'
-import { cors } from 'hono/cors'
+import type { ErrorRequestHandler, RequestHandler } from 'express'
 
-import type { AppEnv } from '../types/env'
+import { env } from '../config/env'
+import { AppError } from '../errors'
 
-/** CORS for the Vite frontend; origins come from `CORS_ORIGIN` (comma-separated). */
-export const corsMiddleware: MiddlewareHandler<AppEnv> = (c, next) => {
-  const allowed = c.env.CORS_ORIGIN?.split(',')
-    .map((o: string) => o.trim())
-    .filter(Boolean) ?? ['http://localhost:5173', 'http://127.0.0.1:5173']
+export function corsMiddleware(): RequestHandler {
+  const allowed = env()
+    .CORS_ORIGIN.split(',')
+    .map((o) => o.trim())
+    .filter(Boolean)
 
-  return cors({
-    origin: allowed,
-    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
-  })(c, next)
+  return (req, res, next) => {
+    const origin = req.headers.origin
+    if (origin && allowed.includes(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin)
+      res.setHeader('Vary', 'Origin')
+      res.setHeader(
+        'Access-Control-Allow-Methods',
+        'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+      )
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization',
+      )
+    }
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(204)
+      return
+    }
+    next()
+  }
+}
+
+export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
+  if (err instanceof AppError) {
+    res.status(err.status).json({ error: err.message })
+    return
+  }
+  console.error(err)
+  res.status(500).json({ error: 'Internal server error' })
 }

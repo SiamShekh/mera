@@ -1,57 +1,81 @@
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
+import { Router } from 'express'
 import { z } from 'zod'
 
+import { env } from '../config/env'
 import { swapController } from '../controllers/swap.controller'
-import { createDb } from '../db'
-import type { AppEnv } from '../types/env'
+import { zodValidate } from '../middleware/zodValidate'
 import {
   swapCompleteBodySchema,
   swapFaucetBodySchema,
 } from '../validators/swap'
+import type { SwapCompleteBody, SwapFaucetBody } from '../validators/swap'
 
-const swap = new Hono<AppEnv>()
+export const swapRouter = Router()
 
-/** Devnet mock swap config (treasury + tradeable mints). */
-swap.get('/config', async (c) => {
-  const db = createDb(c.env.DB)
-  return c.json(await swapController.config(c.env, db))
+swapRouter.get('/config', async (_req, res, next) => {
+  try {
+    res.json(await swapController.config(env()))
+  } catch (error) {
+    next(error)
+  }
 })
 
-/** Quote using live mock prices. */
-swap.post(
+swapRouter.post(
   '/quote',
-  zValidator(
-    'json',
+  zodValidate(
+    'body',
     z.object({
       sellMint: z.string().min(32).max(64),
       buyMint: z.string().min(32).max(64),
       sellAmount: z.number().positive().max(1_000_000_000),
     }),
   ),
-  async (c) => {
-    const db = createDb(c.env.DB)
-    return c.json(await swapController.quote(c.env, db, c.req.valid('json')))
+  async (req, res, next) => {
+    try {
+      res.json(
+        await swapController.quote(
+          env(),
+          req.validated!.body as {
+            sellMint: string
+            buyMint: string
+            sellAmount: number
+          },
+        ),
+      )
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-/**
- * After the user deposits sell tokens to the treasury, mint/transfer buy tokens.
- */
-swap.post(
+swapRouter.post(
   '/complete',
-  zValidator('json', swapCompleteBodySchema),
-  async (c) => {
-    const db = createDb(c.env.DB)
-    const result = await swapController.complete(c.env, db, c.req.valid('json'))
-    return c.json(result)
+  zodValidate('body', swapCompleteBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await swapController.complete(
+        env(),
+        req.validated!.body as SwapCompleteBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
   },
 )
 
-/** Mint a starter bag of mock tokens to the connected wallet. */
-swap.post('/faucet', zValidator('json', swapFaucetBodySchema), async (c) => {
-  const result = await swapController.faucet(c.env, c.req.valid('json'))
-  return c.json(result)
-})
-
-export { swap }
+swapRouter.post(
+  '/faucet',
+  zodValidate('body', swapFaucetBodySchema),
+  async (req, res, next) => {
+    try {
+      const result = await swapController.faucet(
+        env(),
+        req.validated!.body as SwapFaucetBody,
+      )
+      res.json(result)
+    } catch (error) {
+      next(error)
+    }
+  },
+)

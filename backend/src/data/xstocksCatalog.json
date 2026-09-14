@@ -1,0 +1,248 @@
+{
+  "source": "https://xstocks.fi/us/products",
+  "note": "Devnet mock xStocks \u2014 logos from xstocks-metadata.backed.fi; mints are local SPL mocks (not Mainnet xStocks).",
+  "stocks": [
+    {
+      "symbol": "TSLAx",
+      "name": "Tesla xStock",
+      "underlying": "TSLA",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/TSLAx.png",
+      "priceUsd": 363.92,
+      "icon": "/tokens/tslax.png",
+      "mint": "GKBhqP5Sfk2T4S1CHPAqYw2yi7moY6DUwdfGXxKucdUy",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "AAPLx",
+      "name": "Apple xStock",
+      "underlying": "AAPL",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/AAPLx.png",
+      "priceUsd": 334.71,
+      "icon": "/tokens/aaplx.png",
+      "mint": "AHAHq4s58Vp8xxMtpFGrfUfWqsK3oXjJdHCu6mLXiNAJ",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "GOOGLx",
+      "name": "Alphabet xStock",
+      "underlying": "GOOGL",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/GOOGLx.png",
+      "priceUsd": 345.0,
+      "icon": "/tokens/googlx.png",
+      "mint": "CpyEzGpCam7dzsrtBGwMS2dJLhkFoihxAeWRi9DvybBM",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "AMZNx",
+      "name": "Amazon.com xStock",
+      "underlying": "AMZN",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/AMZNx.png",
+      "priceUsd": 253.54,
+      "icon": "/tokens/amznx.png",
+      "mint": "Gty9yzmYuBMHrx3qPdufhCGgw9R4xzb1bFhVqXvNbuEH",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "METAx",
+      "name": "Meta xStock",
+      "underlying": "META",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/METAx.png",
+      "priceUsd": 659.52,
+      "icon": "/tokens/metax.png",
+      "mint": "BKVGtEiACBM9hMPZcHxx9cbbQbnLwBnKLo74cTpQU3fH",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "MSFTx",
+      "name": "Microsoft xStock",
+      "underlying": "MSFT",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/MSFTx.png",
+      "priceUsd": 504.34,
+      "icon": "/tokens/msftx.png",
+      "mint": "3vrm4YVKPKR7rvNNJSdH6EkkkVzuL4tqMWgL1ZjSNmvU",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "SPYx",
+      "name": "SP500 xStock",
+      "underlying": "SPY",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/SPYx.png",
+      "priceUsd": 761.33,
+      "icon": "/tokens/spyx.png",
+      "mint": "Dc983tcLL5zFyYAhcVhfGhbgfZuB6Kez3dqBY8WeP9pB",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "QQQx",
+      "name": "Nasdaq xStock",
+      "underlying": "QQQ",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/QQQx.png",
+      "priceUsd": 709.09,
+      "icon": "/tokens/qqqx.png",
+      "mint": "4R7mpZTfT5E3prScouwRM11xmY8YBgSa1RpHEXT2vP4S",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "COINx",
+      "name": "Coinbase xStock",
+      "underlying": "COIN",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/COINx.png",
+      "priceUsd": 188.37,
+      "icon": "/tokens/coinx.png",
+      "mint": "9WR2gWsQutWW7TyWuvdWFJtzDB4B9mUJkKWGFA9qrtJ8",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "NFLXx",
+      "name": "Netflix xStock",
+      "underlying": "NFLX",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/NFLXx.png",
+      "priceUsd": 80.36,
+      "icon": "/tokens/nflxx.png",
+      "mint": "cqubYeBbjHutRHfeGuHqK79S1AxDCMi8LuFZz28BiXZ",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "AMDx",
+      "name": "AMD xStock",
+      "underlying": "AMD",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/AMDx.png",
+      "priceUsd": 489.38,
+      "icon": "/tokens/amdx.png",
+      "mint": "GYX3hvGJ5kJrxmNoZqArbxJteVUVsZovfLJ7xSAM8khC",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "INTCx",
+      "name": "Intel xStock",
+      "underlying": "INTC",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/INTCx.png",
+      "priceUsd": 97.5,
+      "icon": "/tokens/intcx.png",
+      "mint": "8Mrx8AeBdijB3Cjrs3sDJQYGCTY3i1iP8txgGkkLV4xY",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "BACx",
+      "name": "Bank of America xStock",
+      "underlying": "BAC",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/BACx.png",
+      "priceUsd": 61.84,
+      "icon": "/tokens/bacx.png",
+      "mint": "13FVGRqLjdm1NSMjAHkvwa8HVSNe7pbC8s7ysa3n1bNC",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "JPMx",
+      "name": "JPMorgan Chase xStock",
+      "underlying": "JPM",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/JPMx.png",
+      "priceUsd": 351.62,
+      "icon": "/tokens/jpmx.png",
+      "mint": "TsrHmjk12v4LwKWrjs9HLftrDw63jZdgHAtq5KzjuEw",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "DISx",
+      "name": "The Walt Disney xStock",
+      "underlying": "DIS",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/DISx.png",
+      "priceUsd": 108.78,
+      "icon": "/tokens/disx.png",
+      "mint": "8Lgy6PgZSRGUxG1y6H4G67wBpJERvYYQ2ccEviWNGyep",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "KOx",
+      "name": "Coca-Cola xStock",
+      "underlying": "KO",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/KOx.png",
+      "priceUsd": 89.06,
+      "icon": "/tokens/kox.png",
+      "mint": "3f4ME9R4kbxjrKxdXk1Q4f5V8aWtALyAMyDfQw89jxjG",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "MCDx",
+      "name": "McDonald's xStock",
+      "underlying": "MCD",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/MCDx.png",
+      "priceUsd": 257.73,
+      "icon": "/tokens/mcdx.png",
+      "mint": "EEhEGR9Bed3KbVAfte42svevJzxRdgJ6aK18hF8gdGzw",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "PLTRx",
+      "name": "Palantir xStock",
+      "underlying": "PLTR",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/PLTRx.png",
+      "priceUsd": 171.51,
+      "icon": "/tokens/pltrx.png",
+      "mint": "8vFbWD9JsWnYMEYkrzVigdfHQ66NiuibkN4bmzJCSoF3",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "ORCLx",
+      "name": "Oracle xStock",
+      "underlying": "ORCL",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/ORCLx.png",
+      "priceUsd": 143.29,
+      "icon": "/tokens/orclx.png",
+      "mint": "EdgrUGYtDSpva3yrDzKjkUrvPB8Td5thJQMdgtUsR2Zm",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "CRMx",
+      "name": "Salesforce xStock",
+      "underlying": "CRM",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/CRMx.png",
+      "priceUsd": 256.95,
+      "icon": "/tokens/crmx.png",
+      "mint": "9TVvTbdKuqQJpjq1whU9yYaDpE2YKmBbFPkRJHHG5hS2",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "IBMx",
+      "name": "International Business Machines xStock",
+      "underlying": "IBM",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/IBMx.png",
+      "priceUsd": 249.05,
+      "icon": "/tokens/ibmx.png",
+      "mint": "6Ge5JsapTN4ktmN3Sttf9Q1PypazC8cxB8fFkKUNWH4G",
+      "decimals": 6,
+      "faucetAmount": 2
+    },
+    {
+      "symbol": "WMTx",
+      "name": "Walmart xStock",
+      "underlying": "WMT",
+      "logo": "https://xstocks-metadata.backed.fi/logos/tokens/WMTx.png",
+      "priceUsd": 109.34,
+      "icon": "/tokens/wmtx.png",
+      "mint": "HbKRxUVKDq2EF8dXzStXLByDo2sVoiPAgEYSHrU6fMMA",
+      "decimals": 6,
+      "faucetAmount": 2
+    }
+  ]
+}

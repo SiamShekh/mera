@@ -1,5 +1,4 @@
-import { HTTPException } from 'hono/http-exception'
-
+import { AppError } from '../errors'
 import { runAutopilotAgent, type AutopilotAgentResult } from '../ai/autopilot-agent'
 import {
   compileNaturalLanguageRule,
@@ -7,7 +6,6 @@ import {
   type CompileResult,
 } from '../ai/compile'
 import { generateChatReply } from '../ai/llm'
-import type { Db } from '../db'
 import { rulesController } from './rules.controller'
 import type { Bindings } from '../types/env'
 import type { AutopilotTurnBody } from '../validators/autopilot'
@@ -24,7 +22,6 @@ export type ChatResult =
   | { ok: false; error: string }
 
 export const aiController = {
-  /** 7.02 compile + validations + preview (+ 7.14 fallback). */
   async compile(
     env: Bindings,
     body: CompilePromptBody,
@@ -32,7 +29,6 @@ export const aiController = {
     return compileNaturalLanguageRule(env, body.prompt, body.holdings)
   },
 
-  /** In-app Mera AI assistant (product-scoped chat). */
   async chat(env: Bindings, body: ChatBody): Promise<ChatResult> {
     const result = await generateChatReply(env, {
       message: body.message,
@@ -48,7 +44,6 @@ export const aiController = {
     return { ok: true, reply: result.text, provider: result.provider }
   },
 
-  /** Conversational Autopilot: clarify → propose → confirm → execute intent. */
   async autopilotTurn(
     env: Bindings,
     body: AutopilotTurnBody,
@@ -59,24 +54,18 @@ export const aiController = {
       holdings: body.holdings,
       walletConnected: body.walletConnected,
       pendingRule: body.pendingRule,
+      pendingRules: body.pendingRules,
     })
   },
 
-  /** 7.11 edit → re-validate without saving. */
   validateEdit(body: ValidateCompiledBody): CompileResult {
     return validateEditedRule(body.prompt, body.rule)
   },
 
-  /**
-   * 7.12 confirm + 7.13 save — persist compiled rule after user approval.
-   * Saves as draft or active based on body.status.
-   */
-  async confirm(db: Db, body: ConfirmRuleBody) {
+  async confirm(body: ConfirmRuleBody) {
     const checked = validateEditedRule(body.prompt, body.rule)
     if (!checked.ok) {
-      throw new HTTPException(400, {
-        message: checked.rejection.message,
-      })
+      throw new AppError(400, checked.rejection.message)
     }
 
     const createBody = toCreateRuleBody(
@@ -86,7 +75,7 @@ export const aiController = {
       body.status,
     )
 
-    const rule = await rulesController.create(db, createBody)
+    const rule = await rulesController.create(createBody)
     return {
       rule,
       interpretation: checked.interpretation,
@@ -101,9 +90,9 @@ function toCreateRuleBody(
   rule: ConfirmRuleBody['rule'],
   status: 'draft' | 'active',
 ): CreateRuleBody {
-  if (rule.type === 'take_profit') {
+  if (rule.type === 'take_profit' || rule.type === 'stop_loss') {
     return {
-      type: 'take_profit',
+      type: rule.type,
       userAddress,
       prompt,
       asset: rule.asset,
@@ -112,6 +101,20 @@ function toCreateRuleBody(
       actionUnit: rule.actionUnit,
       actionValue: rule.actionValue,
       sellBasis: rule.sellBasis,
+      status,
+    }
+  }
+
+  if (rule.type === 'market_buy' || rule.type === 'limit_buy') {
+    return {
+      type: rule.type,
+      userAddress,
+      prompt,
+      asset: rule.asset,
+      unit: 'amount',
+      value: rule.value,
+      payAsset: rule.payAsset,
+      limitPrice: rule.type === 'limit_buy' ? rule.limitPrice : null,
       status,
     }
   }
