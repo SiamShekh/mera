@@ -1,0 +1,11 @@
+{
+  "network": "devnet",
+  "rpc": "https://api.devnet.solana.com",
+  "wallet": "YOUR_WALLET",
+  "usdcMint": "USDC_MINT",
+  "nvdaxMint": "NVDAX_MINT",
+  "solxMint": "SOLX_MINT",
+  "stxMint": "STX_MINT",
+  "mockPricesUsd": { "USDC": 1, "NVDAx": 120, "SOLx": 150, "stX": 165 },
+  "minted": { "USDC": 100000, "NVDAx": 1000, "SOLx": 500, "stX": 400 }
+}

@@ -1,8 +1,5 @@
 import {
-  useConnect,
   useConnectedWallet,
-  useDisconnect,
-  useWallets,
   useWalletStatus,
 } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
@@ -12,8 +9,6 @@ import { ActivityPanel } from '@/components/ActivityPanel'
 import { AirdropPanel } from '@/components/AirdropPanel'
 import { BackendHealthPanel } from '@/components/BackendHealthPanel'
 import { HoldingsList } from '@/components/HoldingsList'
-import { Button } from '@/components/ui/button'
-import { ConnectWalletModal } from '@/components/wallet/ConnectWalletModal'
 import { NETWORK_LABEL } from '@/lib/config'
 import { shortenAddress } from '@/lib/format'
 import type { AppClient } from '@/lib/solanaClient'
@@ -23,21 +18,14 @@ const TABS = ['Positions', 'Spot', 'Activity', 'Airdrop'] as const
 type TabId = (typeof TABS)[number]
 
 /**
- * White Jupiter-style portfolio shell:
- * header → tabs → content panels
+ * Portfolio page — narrow stack on mobile, wide dashboard on desktop.
  */
 export function WalletPanel() {
   const client = useClient<AppClient>()
-
   const status = useWalletStatus(client)
-  const wallets = useWallets(client)
   const connected = useConnectedWallet(client)
-  const connect = useConnect(client)
-  const disconnect = useDisconnect(client)
 
-  const [connectOpen, setConnectOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<TabId>('Positions')
-
   const owner = connected?.account.address
 
   if (status === 'pending') {
@@ -49,63 +37,20 @@ export function WalletPanel() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6">
-      {/* Top header */}
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex min-w-0 flex-wrap items-center gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-lime text-sm font-bold text-lime-foreground">
-            P
-          </div>
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="truncate font-semibold text-foreground">
-                {owner ? shortenAddress(owner) : 'Portfolio Manager'}
-              </p>
-              {connected ? (
-                <span className="inline-flex items-center rounded-md bg-lime/30 px-2 py-0.5 text-xs font-medium text-lime-foreground">
-                  Connected
-                </span>
-              ) : (
-                <span className="inline-flex items-center rounded-md bg-secondary px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                  Not connected
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Solana · {NETWORK_LABEL}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {connected ? (
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              disabled={disconnect.isRunning}
-              onClick={() => {
-                disconnect.dispatch()
-              }}
-            >
-              {disconnect.isRunning ? 'Disconnecting…' : 'Disconnect'}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              className="rounded-xl"
-              onClick={() => {
-                setConnectOpen(true)
-              }}
-            >
-              Connect Wallet
-            </Button>
-          )}
+    <div className="mx-auto w-full max-w-lg space-y-5 lg:mx-0 lg:max-w-6xl lg:space-y-6">
+      <header className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-foreground lg:text-2xl">
+            Portfolio
+          </h1>
+          <p className="text-xs text-muted-foreground lg:text-sm">
+            Solana · {NETWORK_LABEL}
+            {owner ? ` · ${shortenAddress(owner)}` : ' · Not connected'}
+          </p>
         </div>
       </header>
 
-      {/* Tabs */}
-      <nav className="flex gap-6 overflow-x-auto border-b border-border">
+      <nav className="flex gap-5 overflow-x-auto border-b border-border lg:gap-8">
         {TABS.map((tab) => {
           const active = tab === activeTab
           return (
@@ -116,7 +61,7 @@ export function WalletPanel() {
                 setActiveTab(tab)
               }}
               className={cn(
-                'relative shrink-0 pb-3 text-sm font-medium transition-colors',
+                'relative shrink-0 cursor-pointer pb-3 text-sm font-medium transition-colors lg:text-base',
                 active
                   ? 'text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
@@ -131,25 +76,15 @@ export function WalletPanel() {
         })}
       </nav>
 
-      {/* Tab content */}
       {!owner ? (
-        <section className="rounded-2xl bg-card px-6 py-16 text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+        <section className="rounded-2xl bg-card px-6 py-14 text-center lg:px-10 lg:py-20">
+          <h2 className="text-xl font-semibold tracking-tight text-foreground lg:text-2xl">
             Connect your wallet
-          </h1>
-          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-            Open the connect panel to link Phantom, Solflare, or another
+          </h2>
+          <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground lg:text-base">
+            Use Connect in the top bar to link Phantom, Solflare, or another
             installed wallet.
           </p>
-          <Button
-            type="button"
-            className="mt-6 rounded-xl"
-            onClick={() => {
-              setConnectOpen(true)
-            }}
-          >
-            Connect Wallet
-          </Button>
         </section>
       ) : (
         <>
@@ -166,23 +101,9 @@ export function WalletPanel() {
         </>
       )}
 
-      <div className="opacity-70">
+      <div className="opacity-70 lg:max-w-md">
         <BackendHealthPanel />
       </div>
-
-      <ConnectWalletModal
-        open={connectOpen}
-        wallets={wallets}
-        connecting={connect.isRunning}
-        onClose={() => {
-          setConnectOpen(false)
-        }}
-        onConnect={(wallet) => {
-          // Kit connect expects the wallet object from useWallets()
-          connect.dispatch(wallet as (typeof wallets)[number])
-          setConnectOpen(false)
-        }}
-      />
     </div>
   )
 }

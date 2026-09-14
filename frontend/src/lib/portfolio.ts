@@ -1,4 +1,12 @@
-import { LAMPORTS_PER_SOL, SOLANA_RPC_URL } from '@/lib/config'
+import { API_URL, LAMPORTS_PER_SOL, SOLANA_RPC_URL } from '@/lib/config'
+import {
+  MOCK_USD_PRICES,
+  NVDAX_MINT,
+  SOLX_MINT,
+  STX_MINT,
+  USDC_MINT,
+} from '@/lib/mints'
+import { TOKEN_ICONS } from '@/lib/tokenIcons'
 import type { Holding } from '@/types/holding'
 
 /** Wrapped SOL mint — used for USD price / icon lookups */
@@ -7,28 +15,24 @@ export const WSOL_MINT = 'So11111111111111111111111111111111111111112'
 const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 
-const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
-const USDT_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB'
-
-/** Common Mainnet mints → readable names */
+/** Devnet mock mints → readable names (never "Unknown") */
 const KNOWN_ASSETS: Record<string, string> = {
   [WSOL_MINT]: 'SOL',
   native: 'SOL',
   [USDC_MINT]: 'USDC',
-  [USDT_MINT]: 'USDT',
-  JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN: 'JUP',
+  [NVDAX_MINT]: 'NVDAx',
+  [SOLX_MINT]: 'SOLx',
+  [STX_MINT]: 'stX',
 }
 
-/** Fallback logos when DexScreener has no image */
+/** Local icons — same as TokenIcon / public/tokens */
 const KNOWN_ICONS: Record<string, string> = {
-  native:
-    'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
-  [WSOL_MINT]:
-    'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png',
-  [USDC_MINT]:
-    'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png',
-  [USDT_MINT]:
-    'https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png',
+  native: TOKEN_ICONS.SOL,
+  [WSOL_MINT]: TOKEN_ICONS.SOL,
+  [USDC_MINT]: TOKEN_ICONS.USDC,
+  [NVDAX_MINT]: TOKEN_ICONS.NVDAx,
+  [SOLX_MINT]: TOKEN_ICONS.SOLx,
+  [STX_MINT]: TOKEN_ICONS.stX,
 }
 
 type RpcTokenAccount = {
@@ -59,15 +63,6 @@ type JsonRpcResult<T> = {
   error?: { message?: string }
 }
 
-type DexPair = {
-  liquidity?: { usd?: number }
-  priceUsd?: string
-  priceChange?: { h24?: number }
-  baseToken?: { address?: string; symbol?: string }
-  quoteToken?: { address?: string; symbol?: string }
-  info?: { imageUrl?: string }
-}
-
 type TokenMarket = {
   priceUsd: number
   priceChange24h: number | null
@@ -75,7 +70,7 @@ type TokenMarket = {
   symbol: string | null
 }
 
-/** Small helper: POST JSON-RPC to our Solana RPC (Helius) */
+/** Small helper: POST JSON-RPC to Devnet RPC */
 async function rpc<T>(method: string, params: unknown[]): Promise<T> {
   const response = await fetch(SOLANA_RPC_URL, {
     method: 'POST',
@@ -121,10 +116,20 @@ async function getSolQuantity(owner: string): Promise<number> {
   return Number(lamports) / Number(LAMPORTS_PER_SOL)
 }
 
-async function getSplTokenRows(
-  owner: string,
-): Promise<Array<{ mint: string; quantity: number }>> {
-  const rows: Array<{ mint: string; quantity: number }> = []
+async function getSplTokenRows(owner: string): Promise<
+  Array<{
+    mint: string
+    quantity: number
+    decimals: number
+    tokenProgram: string
+  }>
+> {
+  const rows: Array<{
+    mint: string
+    quantity: number
+    decimals: number
+    tokenProgram: string
+  }> = []
 
   for (const programId of [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID]) {
     try {
@@ -142,10 +147,11 @@ async function getSplTokenRows(
         const info = item.account.data.parsed?.info
         const mint = info?.mint
         const quantity = info?.tokenAmount?.uiAmount ?? 0
+        const decimals = info?.tokenAmount?.decimals ?? 0
         if (!mint || quantity <= 0) {
           continue
         }
-        rows.push({ mint, quantity })
+        rows.push({ mint, quantity, decimals, tokenProgram: programId })
       }
     } catch {
       // If one token program fails, still keep SOL + other tokens
@@ -156,8 +162,7 @@ async function getSplTokenRows(
 }
 
 /**
- * Prices + icons from DexScreener (works in the browser; CoinGecko often blocks).
- * Stables fall back to $1 if missing.
+ * Devnet mock prices: prefer live backend oracle, fall back to static map.
  */
 async function fetchTokenMarkets(
   mints: string[],
@@ -167,65 +172,40 @@ async function fetchTokenMarkets(
     ...new Set(mints.map((m) => (m === 'native' ? WSOL_MINT : m))),
   ]
 
-  // Sensible defaults for stables
-  for (const stable of [USDC_MINT, USDT_MINT]) {
-    if (lookupMints.includes(stable)) {
-      markets[stable] = {
-        priceUsd: 1,
-        priceChange24h: 0,
-        icon: KNOWN_ICONS[stable] ?? null,
-        symbol: KNOWN_ASSETS[stable] ?? null,
-      }
-    }
-  }
+  const DEMO_SOL_USD = 150
+  const liveByMint = await fetchLiveMockPrices()
 
-  if (lookupMints.length === 0) {
-    return markets
-  }
-
-  try {
-    // DexScreener accepts comma-separated mints
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${lookupMints.join(',')}`
-    const res = await fetch(url)
-    if (!res.ok) {
-      return markets
-    }
-
-    const json = (await res.json()) as { pairs?: DexPair[] | null }
-    const pairs = json.pairs ?? []
-
-    for (const mint of lookupMints) {
-      const matching = pairs.filter(
-        (pair) => pair.baseToken?.address === mint && pair.priceUsd,
-      )
-
-      if (matching.length === 0) {
-        continue
-      }
-
-      // Prefer the pool with the most USD liquidity
-      matching.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))
-      const best = matching[0]
-      const priceUsd = Number(best.priceUsd)
-      if (!Number.isFinite(priceUsd) || priceUsd <= 0) {
-        continue
-      }
-
+  for (const mint of lookupMints) {
+    const live = liveByMint[mint]
+    if (live) {
       markets[mint] = {
-        priceUsd,
-        priceChange24h:
-          typeof best.priceChange?.h24 === 'number'
-            ? best.priceChange.h24
-            : null,
-        icon: best.info?.imageUrl ?? KNOWN_ICONS[mint] ?? null,
-        symbol: best.baseToken?.symbol ?? KNOWN_ASSETS[mint] ?? null,
+        priceUsd: live.priceUsd,
+        priceChange24h: live.changePct,
+        icon: KNOWN_ICONS[mint] ?? null,
+        symbol: live.symbol ?? KNOWN_ASSETS[mint] ?? null,
+      }
+      continue
+    }
+    const mock = MOCK_USD_PRICES[mint]
+    if (typeof mock === 'number') {
+      markets[mint] = {
+        priceUsd: mock,
+        priceChange24h: 0,
+        icon: KNOWN_ICONS[mint] ?? null,
+        symbol: KNOWN_ASSETS[mint] ?? null,
+      }
+      continue
+    }
+    if (mint === WSOL_MINT) {
+      markets[mint] = {
+        priceUsd: liveByMint[SOLX_MINT]?.priceUsd ?? DEMO_SOL_USD,
+        priceChange24h: liveByMint[SOLX_MINT]?.changePct ?? 0,
+        icon: KNOWN_ICONS[mint] ?? null,
+        symbol: 'SOL',
       }
     }
-  } catch {
-    // Keep any defaults we already set
   }
 
-  // Map native SOL to the same market as wrapped SOL
   if (markets[WSOL_MINT]) {
     markets.native = {
       ...markets[WSOL_MINT],
@@ -233,9 +213,8 @@ async function fetchTokenMarkets(
       symbol: 'SOL',
     }
   } else if (mints.includes('native') || mints.includes(WSOL_MINT)) {
-    // Last-resort icon even without a price
     markets.native = {
-      priceUsd: 0,
+      priceUsd: DEMO_SOL_USD,
       priceChange24h: null,
       icon: KNOWN_ICONS.native,
       symbol: 'SOL',
@@ -246,15 +225,48 @@ async function fetchTokenMarkets(
   return markets
 }
 
+async function fetchLiveMockPrices(): Promise<
+  Record<string, { priceUsd: number; changePct: number; symbol: string }>
+> {
+  try {
+    const response = await fetch(`${API_URL}/prices`)
+    if (!response.ok) {
+      return {}
+    }
+    const json = (await response.json()) as {
+      prices?: Array<{
+        mint: string
+        symbol: string
+        priceUsd: number
+        changePct: number
+      }>
+    }
+    const map: Record<
+      string,
+      { priceUsd: number; changePct: number; symbol: string }
+    > = {}
+    for (const row of json.prices ?? []) {
+      map[row.mint] = {
+        priceUsd: row.priceUsd,
+        changePct: row.changePct,
+        symbol: row.symbol,
+      }
+    }
+    return map
+  } catch {
+    return {}
+  }
+}
+
 function assetName(mint: string, marketSymbol: string | null): string {
   if (mint === 'native') {
     return 'SOL'
   }
-  return (
-    marketSymbol ??
-    KNOWN_ASSETS[mint] ??
-    `${mint.slice(0, 4)}…${mint.slice(-4)}`
-  )
+  const known = marketSymbol ?? KNOWN_ASSETS[mint]
+  if (known) {
+    return known
+  }
+  return `${mint.slice(0, 4)}…${mint.slice(-4)}`
 }
 
 function tokenIcon(mint: string, marketIcon: string | null): string | null {
@@ -263,18 +275,28 @@ function tokenIcon(mint: string, marketIcon: string | null): string | null {
 
 /**
  * Load holdings for a connected wallet address.
- * 1) Read SOL + SPL balances from the chain (via Helius RPC)
- * 2) Fetch USD prices + icons (DexScreener)
+ * 1) Read SOL + SPL balances from the chain (Devnet RPC)
+ * 2) Apply fixed mock USD prices for demo mints
  * 3) Compute USD value, SOL value, and allocation %
  */
 export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
   const solQuantity = await getSolQuantity(ownerAddress)
   const splRows = await getSplTokenRows(ownerAddress)
 
-  const raw: Array<{ mint: string; quantity: number }> = []
+  const raw: Array<{
+    mint: string
+    quantity: number
+    decimals: number
+    tokenProgram: string | null
+  }> = []
 
   if (solQuantity > 0) {
-    raw.push({ mint: 'native', quantity: solQuantity })
+    raw.push({
+      mint: 'native',
+      quantity: solQuantity,
+      decimals: 9,
+      tokenProgram: null,
+    })
   }
   raw.push(...splRows)
 
@@ -297,6 +319,8 @@ export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
     return {
       asset: assetName(row.mint, market?.symbol ?? null),
       quantity: row.quantity,
+      decimals: row.decimals,
+      tokenProgram: row.tokenProgram,
       price,
       priceChange24h: market?.priceChange24h ?? null,
       value,

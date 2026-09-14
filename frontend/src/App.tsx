@@ -1,10 +1,27 @@
-import { WalletPanel } from '@/components/wallet/WalletPanel'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+
+import { AppLayout } from '@/layouts/AppLayout'
+import { DepositPage } from '@/pages/DepositPage'
+import { PortfolioPage } from '@/pages/PortfolioPage'
+import { SendPage } from '@/pages/SendPage'
+import { SwapPage } from '@/pages/SwapPage'
+import { VaultPage } from '@/pages/VaultPage'
 
 function App() {
   return (
-    <main className="min-h-svh bg-background px-4 py-6 sm:px-6 sm:py-8">
-      <WalletPanel />
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route index element={<Navigate to="/swap" replace />} />
+          <Route path="swap" element={<SwapPage />} />
+          <Route path="portfolio" element={<PortfolioPage />} />
+          <Route path="vault" element={<VaultPage />} />
+          <Route path="deposit" element={<DepositPage />} />
+          <Route path="send" element={<SendPage />} />
+          <Route path="*" element={<Navigate to="/swap" replace />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 

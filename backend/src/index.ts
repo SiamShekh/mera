@@ -1,23 +1,31 @@
-import { serve } from '@hono/node-server'
-import { Hono } from 'hono'
-import { cors } from 'hono/cors'
+import { createApp } from './app'
+import { createDb } from './db'
+import { ensureFresh } from './solana/priceEngine'
+import type { Bindings } from './types/env'
 
-const app = new Hono()
+/**
+ * Cloudflare Workers entry.
+ * Local: `npm run dev` (Wrangler + local D1 SQLite)
+ * Deploy: `npm run deploy`
+ */
+const app = createApp()
 
-// Allow the React app (Vite) to call this API from the browser
-app.use(
-  '*',
-  cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-  }),
-)
+const worker = {
+  fetch: app.fetch.bind(app),
 
-app.get('/health', (c) => {
-  return c.json({ status: 'ok' })
-})
+  /** Advance mock prices every cron minute. */
+  async scheduled(
+    _controller: ScheduledController,
+    env: Bindings,
+    ctx: ExecutionContext,
+  ) {
+    ctx.waitUntil(
+      (async () => {
+        const db = createDb(env.DB)
+        await ensureFresh(db, env)
+      })(),
+    )
+  },
+}
 
-const port = Number(process.env.PORT) || 3000
-
-serve({ fetch: app.fetch, port }, (info) => {
-  console.log(`Server listening on http://localhost:${info.port}`)
-})
+export default worker

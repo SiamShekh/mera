@@ -6,6 +6,8 @@ export function makeHolding(
 ): Holding {
   return {
     quantity: partial.quantity ?? 1,
+    decimals: partial.decimals ?? 9,
+    tokenProgram: partial.tokenProgram ?? null,
     price: partial.price ?? partial.value,
     valueInSol: partial.valueInSol ?? 0,
     allocation: partial.allocation ?? 0,

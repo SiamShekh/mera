@@ -64,7 +64,7 @@ export function PortfolioInsights({
   const pnlPercent = diff?.totalValueChangePercent ?? 0
 
   return (
-    <section className="rounded-2xl bg-card p-5 sm:p-6">
+    <section className="rounded-2xl bg-card p-5 sm:p-6 lg:p-7">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">Spot PnL</p>
         <div className="flex gap-2">

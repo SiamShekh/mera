@@ -5,15 +5,16 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', '.wrangler', 'worker-configuration.d.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, tseslint.configs.recommended],
     languageOptions: {
       ecmaVersion: 2023,
-      globals: globals.node,
+      globals: {
+        ...globals.worker,
+      },
     },
   },
-  // Turn off ESLint rules that fight with Prettier
   eslintConfigPrettier,
 ])

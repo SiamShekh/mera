@@ -8,7 +8,7 @@ type SolanaProviderProps = {
 }
 
 /**
- * Publishes the Kit Mainnet client to React.
+ * Publishes the Kit Devnet client to React.
  * Wallet + RPC hooks read from this one provider.
  */
 export function SolanaProvider({ children }: SolanaProviderProps) {

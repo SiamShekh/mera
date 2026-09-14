@@ -135,7 +135,7 @@ export function ConnectWalletModal({
             type="button"
             variant="ghost"
             size="icon"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             onClick={onClose}
             aria-label="Close"
           >
@@ -153,7 +153,7 @@ export function ConnectWalletModal({
                 onClick={() => {
                   onConnect(wallets[0])
                 }}
-                className="flex w-full items-center gap-3 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:bg-secondary disabled:opacity-60"
+                className="flex w-full items-center cursor-pointer gap-3 rounded-2xl border border-border bg-card p-4 text-left transition-colors hover:bg-secondary disabled:opacity-60"
               >
                 <WalletIcon wallet={wallets[0]} />
                 <div className="min-w-0 flex-1">
@@ -200,7 +200,7 @@ export function ConnectWalletModal({
                       onConnect(wallet)
                     }}
                     className={cn(
-                      'flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-3 text-center transition-colors hover:bg-secondary',
+                      'flex flex-col cursor-pointer items-center gap-2 rounded-2xl border border-border bg-card p-3 text-center transition-colors hover:bg-secondary',
                       'disabled:opacity-60',
                     )}
                   >

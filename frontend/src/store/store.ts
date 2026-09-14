@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit'
 
+import { api } from '@/store/api'
 import healthReducer from '@/store/healthSlice'
 import activityReducer from '@/store/activitySlice'
 import portfolioReducer from '@/store/portfolioSlice'
@@ -10,7 +11,10 @@ export const store = configureStore({
     health: healthReducer,
     portfolio: portfolioReducer,
     activity: activityReducer,
+    [api.reducerPath]: api.reducer,
   },
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware().concat(api.middleware),
 })
 
 // Helpful TypeScript types for useSelector / useDispatch

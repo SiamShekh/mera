@@ -7,6 +7,10 @@ export type Holding = {
   asset: string
   /** How many tokens the wallet holds */
   quantity: number
+  /** Token decimals (9 for SOL, 6 for USDC, …) */
+  decimals: number
+  /** SPL token program id, or null for native SOL */
+  tokenProgram: string | null
   /** USD price per 1 token */
   price: number
   /** 24h price change percent (e.g. -2.38) */

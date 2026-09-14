@@ -19,7 +19,7 @@ function formatWhen(blockTime: number | null) {
 }
 
 /**
- * Recent on-chain activity for the connected wallet (Mainnet signatures).
+ * Recent on-chain activity for the connected wallet (Devnet signatures).
  */
 export function ActivityPanel({ ownerAddress }: ActivityPanelProps) {
   const dispatch = useAppDispatch()
@@ -31,11 +31,13 @@ export function ActivityPanel({ ownerAddress }: ActivityPanelProps) {
 
   return (
     <section className="overflow-hidden rounded-2xl bg-card">
-      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4 sm:px-6">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4 sm:px-6 lg:px-7">
         <div>
-          <h2 className="text-base font-semibold text-foreground">Activity</h2>
+          <h2 className="text-base font-semibold text-foreground lg:text-lg">
+            Activity
+          </h2>
           <p className="text-sm text-muted-foreground">
-            Recent Mainnet transactions
+            Recent Devnet transactions
           </p>
         </div>
         <Button
@@ -76,7 +78,7 @@ export function ActivityPanel({ ownerAddress }: ActivityPanelProps) {
             return (
               <li
                 key={item.signature}
-                className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6"
+                className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 sm:px-6 lg:px-7"
               >
                 <div className="min-w-0">
                   <p className="font-medium text-foreground">
