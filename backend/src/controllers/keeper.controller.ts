@@ -1,10 +1,5 @@
 import { AppError } from '../errors'
-import {
-  Portfolio,
-  RuleModel,
-  User,
-  type Rule,
-} from '../models'
+import { Portfolio, RuleModel, User, type Rule } from '../models'
 import { leanRequired } from '../models/lean'
 import {
   executeArmedBuy,
@@ -150,8 +145,7 @@ export const keeperController = {
     )
 
     if (evalResult?.triggered) {
-      const isBuy =
-        armed.type === 'market_buy' || armed.type === 'limit_buy'
+      const isBuy = armed.type === 'market_buy' || armed.type === 'limit_buy'
       const execution = isBuy
         ? await executeArmedBuy(env, armed)
         : await executeArmedSell(env, armed)

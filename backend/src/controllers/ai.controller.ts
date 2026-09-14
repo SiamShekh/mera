@@ -1,5 +1,8 @@
 import { AppError } from '../errors'
-import { runAutopilotAgent, type AutopilotAgentResult } from '../ai/autopilot-agent'
+import {
+  runAutopilotAgent,
+  type AutopilotAgentResult,
+} from '../ai/autopilot-agent'
 import {
   compileNaturalLanguageRule,
   validateEditedRule,
@@ -18,8 +21,7 @@ import type {
 import type { CreateRuleBody } from '../validators/rule'
 
 export type ChatResult =
-  | { ok: true; reply: string; provider: 'openai' }
-  | { ok: false; error: string }
+  { ok: true; reply: string; provider: 'openai' } | { ok: false; error: string }
 
 export const aiController = {
   async compile(

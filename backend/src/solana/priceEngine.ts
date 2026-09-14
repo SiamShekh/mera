@@ -172,10 +172,7 @@ async function pruneTicks(mint: string): Promise<void> {
 }
 
 /** Advance all assets by one minute bar. */
-export async function stepAll(
-  env: Env,
-  minuteOffset = 0,
-): Promise<PriceBook> {
+export async function stepAll(env: Env, minuteOffset = 0): Promise<PriceBook> {
   await ensureSeeded(env)
   const assets = seedAssetsFromEnv(env)
   const peggedByMint = new Map(assets.map((a) => [a.mint, Boolean(a.pegged)]))

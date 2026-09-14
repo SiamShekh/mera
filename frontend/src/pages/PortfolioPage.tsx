@@ -1,4 +1,3 @@
-import { VaultAutopilotPanel } from '@/components/vault/VaultAutopilotPanel'
 import { WalletPanel } from '@/components/wallet/WalletPanel'
 
 /** Connected-wallet portfolio dashboard + autopilot vault setup */

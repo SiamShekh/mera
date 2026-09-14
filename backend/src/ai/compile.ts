@@ -55,7 +55,13 @@ export async function compileNaturalLanguageRule(
     // patterns (e.g. absolute-price sells) before surfacing the AI rejection.
     const fallback = fallbackCompile(prompt)
     if (!('rejection' in fallback)) {
-      return toCompileResult(fallback, prompt, 'fallback', undefined, llm.provider)
+      return toCompileResult(
+        fallback,
+        prompt,
+        'fallback',
+        undefined,
+        llm.provider,
+      )
     }
 
     if (fromAi.source === 'ai') return fromAi

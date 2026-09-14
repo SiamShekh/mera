@@ -104,7 +104,11 @@ const sellSideSchema = z
     status: z.enum(['draft', 'active', 'paused']).default('active'),
   })
   .superRefine((data, ctx) => {
-    if (data.type === 'stop_loss' && data.unit === 'amount' && !(data.value > 0)) {
+    if (
+      data.type === 'stop_loss' &&
+      data.unit === 'amount' &&
+      !(data.value > 0)
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['value'],
@@ -146,7 +150,10 @@ const buySideSchema = z
     status: z.enum(['draft', 'active', 'paused']).default('active'),
   })
   .superRefine((data, ctx) => {
-    if (data.type === 'limit_buy' && !(data.limitPrice != null && data.limitPrice > 0)) {
+    if (
+      data.type === 'limit_buy' &&
+      !(data.limitPrice != null && data.limitPrice > 0)
+    ) {
       ctx.addIssue({
         code: 'custom',
         path: ['limitPrice'],

@@ -91,7 +91,9 @@ export const rulesController = {
           ...(body.actionValue !== undefined
             ? { actionValue: body.actionValue }
             : {}),
-          ...(body.sellBasis !== undefined ? { sellBasis: body.sellBasis } : {}),
+          ...(body.sellBasis !== undefined
+            ? { sellBasis: body.sellBasis }
+            : {}),
           updatedAt: new Date().toISOString(),
         },
       },

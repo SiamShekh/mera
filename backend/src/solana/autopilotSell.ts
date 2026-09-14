@@ -404,7 +404,10 @@ function resolveBuyToken(
   }>,
   asset: string,
 ) {
-  const want = asset.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const want = asset
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
   const exact = tokens.find(
     (t) => t.symbol.toUpperCase() === asset.toUpperCase(),
   )

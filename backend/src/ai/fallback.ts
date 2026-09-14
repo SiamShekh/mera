@@ -332,7 +332,10 @@ function tryStopLoss(
   if (priceMatch) {
     const value = Number(priceMatch[1])
     if (!(value > 0)) {
-      return rejection('missing_details', 'Stop-loss price must be greater than 0.')
+      return rejection(
+        'missing_details',
+        'Stop-loss price must be greater than 0.',
+      )
     }
     return {
       type: 'stop_loss',

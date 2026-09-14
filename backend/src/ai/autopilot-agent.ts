@@ -292,7 +292,9 @@ function coerceOneRule(raw: unknown): CompiledRule | null {
       typeof row.asset === 'string' ? normalizeAsset(row.asset) : null
     if (!asset) return null
     const actionUnit =
-      row.actionUnit === 'amount' || row.unit === 'amount' ? 'amount' : 'percent'
+      row.actionUnit === 'amount' || row.unit === 'amount'
+        ? 'amount'
+        : 'percent'
     const actionValue = Number(
       row.actionValue ?? row.value ?? (actionUnit === 'percent' ? 100 : 0),
     )
@@ -358,8 +360,7 @@ function expandLiquidateIfNeeded(
 
   const sells: CompiledRule[] = []
   for (const row of holdings) {
-    const symbol =
-      normalizeAsset(row.symbol) ?? row.symbol.toUpperCase()
+    const symbol = normalizeAsset(row.symbol) ?? row.symbol.toUpperCase()
     if (symbol === 'USDC' || symbol === 'SOL') continue
     if (!(row.quantity > 0)) continue
     sells.push({
@@ -460,9 +461,7 @@ function expandBuyLadderIfNeeded(
     (/\b(usdc|cash)\b/i.test(message) ? 'USDC' : null)
   const asset =
     existingBuys[0]?.asset ??
-    normalizeAsset(
-      message.match(/nvidi[a-z]*|nvdax|nvda/i)?.[0] ?? 'NVDAx',
-    ) ??
+    normalizeAsset(message.match(/nvidi[a-z]*|nvdax|nvda/i)?.[0] ?? 'NVDAx') ??
     'NVDAx'
   if (!payAsset) return rules
 

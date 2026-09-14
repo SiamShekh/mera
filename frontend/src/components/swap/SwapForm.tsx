@@ -5,7 +5,7 @@ import {
 } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
 import { useEffect, useMemo, useState } from 'react'
-import { ArrowDownUp, ChevronDown, Settings2 } from 'lucide-react'
+import { ArrowDownUp, ChevronDown } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { TokenIcon } from '@/components/TokenIcon'
