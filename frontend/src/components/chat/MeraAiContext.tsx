@@ -10,14 +10,11 @@ import {
 type OpenChatOptions = {
   /** Prefill the composer (e.g. Autopilot starter). */
   draft?: string
-  /** Optional first-message hint shown as empty-state starter focus. */
-  intent?: 'autopilot'
 }
 
 type MeraAiContextValue = {
   open: boolean
   draftPrefill: string | null
-  intent: 'autopilot' | null
   openChat: (options?: OpenChatOptions) => void
   closeChat: () => void
   consumeDraftPrefill: () => string | null
@@ -43,17 +40,14 @@ function getInitialChatOpen() {
 export function MeraAiProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(getInitialChatOpen)
   const [draftPrefill, setDraftPrefill] = useState<string | null>(null)
-  const [intent, setIntent] = useState<'autopilot' | null>(null)
 
   const openChat = useCallback((options?: OpenChatOptions) => {
     setDraftPrefill(options?.draft ?? null)
-    setIntent(options?.intent ?? null)
     setOpen(true)
   }, [])
 
   const closeChat = useCallback(() => {
     setOpen(false)
-    setIntent(null)
   }, [])
 
   const consumeDraftPrefill = useCallback(() => {
@@ -66,12 +60,11 @@ export function MeraAiProvider({ children }: { children: ReactNode }) {
     () => ({
       open,
       draftPrefill,
-      intent,
       openChat,
       closeChat,
       consumeDraftPrefill,
     }),
-    [open, draftPrefill, intent, openChat, closeChat, consumeDraftPrefill],
+    [open, draftPrefill, openChat, closeChat, consumeDraftPrefill],
   )
 
   return (

@@ -6,12 +6,11 @@ import {
 } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
 import { useState } from 'react'
-import { Check, ChevronDown, Copy } from 'lucide-react'
+import { Check, Copy } from 'lucide-react'
 
 import { DepositQr } from '@/components/deposit/DepositQr'
 import { Button } from '@/components/ui/button'
 import { ConnectWalletModal } from '@/components/wallet/ConnectWalletModal'
-import { NETWORK_LABEL } from '@/lib/config'
 import type { AppClient } from '@/lib/solanaClient'
 
 /**
@@ -46,41 +45,15 @@ export function DepositPage() {
 
   if (status === 'pending') {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="flex flex-1 items-center justify-center">
         <p className="text-sm text-muted-foreground">Loading wallet…</p>
       </div>
     )
   }
 
   return (
-    <div className="flex w-full flex-col items-center px-1 py-6 lg:min-h-[calc(100svh-11rem)] lg:justify-center lg:py-10">
-      {/* <header className="mb-6 max-w-xl text-center lg:mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
-          Bring your funds to{' '}
-          <span className="bg-gradient-to-r from-[#9945FF] to-[#14F195] bg-clip-text text-transparent">
-            Solana
-          </span>
-          , all in one place
-        </h1>
-        <p className="mt-3 text-sm text-muted-foreground">
-          Solana deposits · {NETWORK_LABEL}
-        </p>
-      </header> */}
-
+    <div className="flex w-full flex-1 flex-col items-center justify-center px-1 py-4">
       <section className="w-full max-w-[420px] space-y-5 rounded-3xl border border-border bg-card p-4 shadow-sm sm:p-5">
-        {/* <div>
-          <p className="mb-2 text-sm text-muted-foreground">Chain</p>
-          <div className="flex h-12 w-full items-center gap-2.5 rounded-2xl border border-border bg-background px-3">
-            <span className="flex size-7 items-center justify-center rounded-full bg-[#9945FF]/15">
-              <SolanaMark />
-            </span>
-            <span className="flex-1 text-left text-sm font-semibold text-foreground">
-              Solana
-            </span>
-            <ChevronDown className="size-4 text-muted-foreground opacity-40" />
-          </div>
-        </div> */}
-
         {!owner ? (
           <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-10 text-center">
             <p className="text-base font-semibold text-foreground">
@@ -151,20 +124,5 @@ export function DepositPage() {
         }}
       />
     </div>
-  )
-}
-
-function SolanaMark() {
-  return (
-    <svg
-      viewBox="0 0 397.7 311.7"
-      className="size-3.5 text-[#9945FF]"
-      aria-hidden
-    >
-      <path
-        fill="currentColor"
-        d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7zM64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8zM333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"
-      />
-    </svg>
   )
 }

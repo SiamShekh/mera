@@ -1,6 +1,5 @@
-import { Plus, Settings2 } from 'lucide-react'
-
 import { TokenIcon } from '@/components/TokenIcon'
+import { WalletConnectControl } from '@/components/wallet/WalletConnectControl'
 import { cn } from '@/lib/utils'
 import { useGetPricesQuery } from '@/store/api'
 
@@ -15,7 +14,8 @@ const FALLBACK = [
   { symbol: 'NVDAx', priceUsd: 120, changePct: 0 },
   { symbol: 'MSFTx', priceUsd: 504.34, changePct: 0 },
   { symbol: 'SPYx', priceUsd: 761.33, changePct: 0 },
-  { symbol: 'USDC', priceUsd: 1, changePct: 0 },
+  { symbol: 'METAx', priceUsd: 612, changePct: 0 },
+  { symbol: 'AMZNx', priceUsd: 228, changePct: 0 },
 ] as const
 
 function formatTickerPrice(symbol: string, price: number): string {
@@ -28,67 +28,81 @@ function formatTickerPrice(symbol: string, price: number): string {
   return `$${price.toFixed(3)}`
 }
 
+function TickerChip({
+  symbol,
+  priceUsd,
+  changePct,
+}: {
+  symbol: string
+  priceUsd: number
+  changePct: number
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 text-xs">
+      <TokenIcon symbol={symbol} size="sm" />
+      <span className="font-medium text-foreground">{symbol}</span>
+      <span className="text-muted-foreground">
+        {formatTickerPrice(symbol, priceUsd)}
+      </span>
+      <span
+        className={cn(
+          'font-medium',
+          changePct < 0 && 'text-destructive',
+          changePct > 0 && 'text-positive',
+          changePct === 0 && 'text-muted-foreground',
+        )}
+      >
+        {changePct > 0 ? '+' : ''}
+        {changePct.toFixed(1)}%
+      </span>
+    </div>
+  )
+}
+
 /**
- * Horizontal price strip fed by the mock oracle (Socket.io + initial REST).
+ * Marquee price strip + wallet control on the right.
  */
 export function PriceTicker({ className }: PriceTickerProps) {
   const { data } = useGetPricesQuery()
 
   const items =
     data?.prices?.length && data.prices.length > 0
-      ? data.prices.map((row) => ({
-          symbol: row.symbol,
-          priceUsd: row.priceUsd,
-          changePct: row.changePct,
-        }))
+      ? data.prices
+          .filter((row) => row.symbol !== 'USDC')
+          .map((row) => ({
+            symbol: row.symbol,
+            priceUsd: row.priceUsd,
+            changePct: row.changePct,
+          }))
       : [...FALLBACK]
+
+  const loop = [...items, ...items]
 
   return (
     <div
       className={cn(
-        'flex items-center gap-2 border-b border-border px-3 py-2',
+        'flex items-center gap-3 border-b border-border bg-background/80 py-2 pr-3 pl-0 backdrop-blur',
         className,
       )}
     >
-      <button
-        type="button"
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground"
-        aria-label="Ticker settings"
-      >
-        <Settings2 className="size-4" />
-      </button>
-      <div className="scrollbar-none flex min-w-0 flex-1 items-center gap-4 overflow-x-auto">
-        {items.map((row) => (
-          <div
-            key={row.symbol}
-            className="flex shrink-0 items-center gap-1.5 text-xs"
-          >
-            <TokenIcon symbol={row.symbol} size="sm" />
-            <span className="font-medium text-foreground">{row.symbol}</span>
-            <span className="text-muted-foreground">
-              {formatTickerPrice(row.symbol, row.priceUsd)}
-            </span>
-            <span
-              className={cn(
-                'font-medium',
-                row.changePct < 0 && 'text-destructive',
-                row.changePct > 0 && 'text-positive',
-                row.changePct === 0 && 'text-muted-foreground',
-              )}
-            >
-              {row.changePct > 0 ? '+' : ''}
-              {row.changePct.toFixed(1)}%
-            </span>
-          </div>
-        ))}
+      <div className="relative min-w-0 flex-1 overflow-hidden">
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-linear-to-r from-background to-transparent" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-linear-to-l from-background to-transparent" />
+        <div className="ticker-marquee flex w-max items-center gap-6 px-4">
+          {loop.map((row, index) => (
+            <TickerChip
+              key={`${row.symbol}-${index}`}
+              symbol={row.symbol}
+              priceUsd={row.priceUsd}
+              changePct={row.changePct}
+            />
+          ))}
+        </div>
       </div>
-      <button
-        type="button"
-        className="flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground"
-        aria-label="Add token to ticker"
-      >
-        <Plus className="size-4" />
-      </button>
+
+      <div className="hidden shrink-0 lg:block">
+        <WalletConnectControl />
+      </div>
     </div>
   )
 }

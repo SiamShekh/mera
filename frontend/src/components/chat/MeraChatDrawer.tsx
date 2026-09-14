@@ -1,7 +1,7 @@
 import { useConnectedWallet } from '@solana/kit-plugin-wallet/react'
 import { useClient } from '@solana/react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { ArrowLeft, ArrowUp, EllipsisVertical, History, Trash2, X } from 'lucide-react'
+import { ArrowUp, EllipsisVertical, History, Trash2, X } from 'lucide-react'
 
 import { useMeraAi } from '@/components/chat/MeraAiContext'
 import { ChatMarkdown, stripMarkdown } from '@/components/chat/ChatMarkdown'
@@ -96,19 +96,6 @@ function joinChatBlocks(
     .filter((part) => part.length > 0)
     .join('\n\n')
 }
-
-const STARTERS = [
-  'Buy 5 NVIDIA',
-  'Buy 2 NVDAx at $80, 5 at $100, and 8 at $105 with USDC',
-  'Keep my portfolio diversified, never let Nvidia exceed 40%, and always keep at least $500 USDC',
-] as const
-
-const AUTOPILOT_STARTERS = [
-  'Buy 5 NVIDIA',
-  'Buy 2 NVDAx at $80, 5 at $100, and 8 at $105 with USDC',
-  'Sell if NVDAx drops to $80',
-  'Keep diversified + at least $500 USDC',
-] as const
 
 function nextId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -219,7 +206,7 @@ function computeSellUiAmount(
  * Reopen from the sidebar "AI Chat" item after closing.
  */
 export function MeraChatDrawer() {
-  const { open, closeChat, intent, consumeDraftPrefill } = useMeraAi()
+  const { open, closeChat, consumeDraftPrefill } = useMeraAi()
   const client = useClient<AppClient>()
   const connected = useConnectedWallet(client)
   const dispatch = useAppDispatch()
@@ -257,7 +244,6 @@ export function MeraChatDrawer() {
   activeIdRef.current = activeId
 
   const active = threads.find((t) => t.id === activeId) ?? threads[0]
-  const starterPrompts = intent === 'autopilot' ? AUTOPILOT_STARTERS : STARTERS
   const ownerAddress = connected?.account.address
 
   // Load persisted threads when a wallet connects.
@@ -267,59 +253,59 @@ export function MeraChatDrawer() {
     }
     let cancelled = false
     setHistoryLoading(true)
-    ;(async () => {
-      try {
-        const listed = await listChatThreads({
-          userAddress: ownerAddress,
-        }).unwrap()
-        if (cancelled) return
-
-        if (listed.threads.length === 0) {
-          const created = await createChatThread({
+    void (async () => {
+        try {
+          const listed = await listChatThreads({
             userAddress: ownerAddress,
           }).unwrap()
           if (cancelled) return
-          setThreads([
-            {
-              id: created.thread.id,
-              title: created.thread.title,
-              updatedAt: formatRelativeTime(created.thread.updatedAt),
-              messages: [],
-            },
-          ])
-          setActiveId(created.thread.id)
-          return
-        }
 
-        const loaded = await Promise.all(
-          listed.threads.map(async (summary) => {
-            const { thread } = await getChatThread({
-              id: summary.id,
+          if (listed.threads.length === 0) {
+            const created = await createChatThread({
               userAddress: ownerAddress,
             }).unwrap()
-            return {
-              id: thread.id,
-              title: thread.title,
-              updatedAt: formatRelativeTime(thread.updatedAt),
-              messages: thread.messages.map((message) => ({
-                id: message.id,
-                role: message.role,
-                content: message.content,
-              })),
-            } satisfies Thread
-          }),
-        )
-        if (cancelled) return
-        setThreads(loaded)
-        setActiveId(loaded[0]?.id ?? activeIdRef.current)
-      } catch {
-        // Keep in-memory threads if history API is unavailable.
-      } finally {
-        if (!cancelled) {
-          setHistoryLoading(false)
+            if (cancelled) return
+            setThreads([
+              {
+                id: created.thread.id,
+                title: created.thread.title,
+                updatedAt: formatRelativeTime(created.thread.updatedAt),
+                messages: [],
+              },
+            ])
+            setActiveId(created.thread.id)
+            return
+          }
+
+          const loaded = await Promise.all(
+            listed.threads.map(async (summary) => {
+              const { thread } = await getChatThread({
+                id: summary.id,
+                userAddress: ownerAddress,
+              }).unwrap()
+              return {
+                id: thread.id,
+                title: thread.title,
+                updatedAt: formatRelativeTime(thread.updatedAt),
+                messages: thread.messages.map((message) => ({
+                  id: message.id,
+                  role: message.role,
+                  content: message.content,
+                })),
+              } satisfies Thread
+            }),
+          )
+          if (cancelled) return
+          setThreads(loaded)
+          setActiveId(loaded[0]?.id ?? activeIdRef.current)
+        } catch {
+          // Keep in-memory threads if history API is unavailable.
+        } finally {
+          if (!cancelled) {
+            setHistoryLoading(false)
+          }
         }
-      }
-    })()
+      })()
     return () => {
       cancelled = true
     }
@@ -581,11 +567,11 @@ export function MeraChatDrawer() {
           prev.map((thread) =>
             thread.id === resolvedId
               ? {
-                  ...thread,
-                  id: remoteId,
-                  title: nextTitle ?? created.thread.title,
-                  updatedAt: formatRelativeTime(created.thread.updatedAt),
-                }
+                ...thread,
+                id: remoteId,
+                title: nextTitle ?? created.thread.title,
+                updatedAt: formatRelativeTime(created.thread.updatedAt),
+              }
               : thread,
           ),
         )
@@ -607,10 +593,10 @@ export function MeraChatDrawer() {
         prev.map((thread) =>
           thread.id === remoteId
             ? {
-                ...thread,
-                title: saved.thread.title,
-                updatedAt: formatRelativeTime(saved.thread.updatedAt),
-              }
+              ...thread,
+              title: saved.thread.title,
+              updatedAt: formatRelativeTime(saved.thread.updatedAt),
+            }
             : thread,
         ),
       )
@@ -874,7 +860,7 @@ export function MeraChatDrawer() {
         activated.push(
           armed.settledNow
             ? armed.execution?.note ??
-                `Bought ${armed.execution?.buyAmount ?? rule.value} ${rule.asset} now`
+            `Bought ${armed.execution?.buyAmount ?? rule.value} ${rule.asset} now`
             : `${rule.asset} ${rule.type} armed — ${armed.reason}`,
         )
 
@@ -1089,283 +1075,250 @@ export function MeraChatDrawer() {
       )}
       aria-label="Mera AI"
     >
-        <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
-          <div className="flex min-w-0 items-center gap-2">
-            {view !== 'chat' ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="rounded-xl"
-                onClick={() => {
-                  setView('chat')
-                }}
-                aria-label="Back to chat"
-              >
-                <ArrowLeft className="size-4" />
-              </Button>
-            ) : (
-              <MiraAvatar size="md" />
-            )}
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight text-foreground">
-                {view === 'chat' ? (active?.title ?? title) : title}
-              </p>
-              {view === 'chat' ? (
-                <p className="text-[11px] text-muted-foreground">Inside Mera</p>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-0.5">
+      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold tracking-tight text-foreground capitalize">
+              {view === 'chat' ? (active?.title ?? title) : title}
+            </p>
             {view === 'chat' ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="rounded-xl"
-                onClick={() => {
-                  setView('history')
-                }}
-                aria-label="History"
-              >
-                <History className="size-4" />
-              </Button>
+              <p className="text-[11px] text-muted-foreground">Autopilot</p>
             ) : null}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-0.5">
+          {view === 'chat' ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
               className="rounded-xl"
-              onClick={closeChat}
-              aria-label="Close"
+              onClick={() => {
+                setView('history')
+              }}
+              aria-label="History"
             >
-              <X className="size-4" />
+              <History className="size-4" />
             </Button>
-          </div>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="rounded-xl"
+            onClick={closeChat}
+            aria-label="Close"
+          >
+            <X className="size-4" />
+          </Button>
         </div>
+      </div>
 
-        {view === 'history' ? (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
-            <Button
-              type="button"
-              className="mb-3 h-11 w-full rounded-2xl bg-lime font-semibold text-lime-foreground hover:bg-lime/90"
-              onClick={startNewChat}
-            >
-              New chat
-            </Button>
-            <ul className="space-y-1">
-              {threads.map((thread) => (
-                <li key={thread.id} className="relative">
+      {view === 'history' ? (
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
+          <Button
+            type="button"
+            className="mb-3 h-11 w-full rounded-2xl bg-lime font-semibold text-lime-foreground hover:bg-lime/90"
+            onClick={startNewChat}
+          >
+            New chat
+          </Button>
+          <ul className="space-y-1">
+            {threads.map((thread) => (
+              <li key={thread.id} className="relative">
+                <div
+                  className={cn(
+                    'flex items-start gap-1 rounded-2xl px-2 py-2 transition',
+                    thread.id === activeId
+                      ? 'bg-secondary'
+                      : 'hover:bg-secondary/70',
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMenuThreadId(null)
+                      setActiveId(thread.id)
+                      setView('chat')
+                    }}
+                    className="min-w-0 flex-1 cursor-pointer rounded-xl px-1.5 py-1 text-left"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-sm font-medium text-foreground">
+                        {thread.title}
+                      </p>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {thread.updatedAt}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                      {thread.messages.length > 0
+                        ? stripMarkdown(
+                          thread.messages[thread.messages.length - 1]!
+                            .content,
+                        ) || 'Empty chat'
+                        : 'Empty chat'}
+                    </p>
+                  </button>
+
                   <div
+                    className="relative shrink-0"
+                    ref={
+                      menuThreadId === thread.id ? historyMenuRef : undefined
+                    }
+                  >
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
+                      aria-label="Chat options"
+                      aria-haspopup="menu"
+                      aria-expanded={menuThreadId === thread.id}
+                      disabled={deletingThreadId === thread.id}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setMenuThreadId((current) =>
+                          current === thread.id ? null : thread.id,
+                        )
+                      }}
+                    >
+                      <EllipsisVertical className="size-4" />
+                    </Button>
+
+                    {menuThreadId === thread.id ? (
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-9 z-20 min-w-[9.5rem] overflow-hidden rounded-xl border border-border bg-card py-1 shadow-md"
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-destructive hover:bg-secondary"
+                          disabled={deletingThreadId === thread.id}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void deleteThread(thread.id)
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                          {deletingThreadId === thread.id
+                            ? 'Deleting…'
+                            : 'Delete chat'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {view === 'chat' ? (
+        <>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
+            {historyLoading ? (
+              <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
+                <MiraAvatar className="mb-3" size="md" />
+                <p className="text-sm text-muted-foreground">
+                  Loading chat history…
+                </p>
+              </div>
+            ) : active && active.messages.length === 0 ? (
+              <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
+                <div className="mb-3 flex size-11 items-center justify-center overflow-hidden rounded-2xl bg-lime/20">
+                  <img
+                    src={PROJECT_LOGO_URL}
+                    alt="Mera"
+                    className="size-9 object-contain"
+                  />
+                </div>
+                <p className="text-base font-semibold text-foreground">
+                  Talk to Autopilot
+                </p>
+                <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+                  Say what you want in natural language, and AI will convert it
+                  into a program.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {active?.messages.map((message) => (
+                  <div
+                    key={message.id}
                     className={cn(
-                      'flex items-start gap-1 rounded-2xl px-2 py-2 transition',
-                      thread.id === activeId
-                        ? 'bg-secondary'
-                        : 'hover:bg-secondary/70',
+                      'flex gap-2.5',
+                      message.role === 'user'
+                        ? 'justify-end'
+                        : 'justify-start',
                     )}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMenuThreadId(null)
-                        setActiveId(thread.id)
-                        setView('chat')
-                      }}
-                      className="min-w-0 flex-1 cursor-pointer rounded-xl px-1.5 py-1 text-left"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-medium text-foreground">
-                          {thread.title}
-                        </p>
-                        <span className="shrink-0 text-[10px] text-muted-foreground">
-                          {thread.updatedAt}
-                        </span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                        {thread.messages.length > 0
-                          ? stripMarkdown(
-                              thread.messages[thread.messages.length - 1]!
-                                .content,
-                            ) || 'Empty chat'
-                          : 'Empty chat'}
-                      </p>
-                    </button>
-
                     <div
-                      className="relative shrink-0"
-                      ref={
-                        menuThreadId === thread.id ? historyMenuRef : undefined
-                      }
-                    >
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-8 rounded-xl text-muted-foreground hover:text-foreground"
-                        aria-label="Chat options"
-                        aria-haspopup="menu"
-                        aria-expanded={menuThreadId === thread.id}
-                        disabled={deletingThreadId === thread.id}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          setMenuThreadId((current) =>
-                            current === thread.id ? null : thread.id,
-                          )
-                        }}
-                      >
-                        <EllipsisVertical className="size-4" />
-                      </Button>
-
-                      {menuThreadId === thread.id ? (
-                        <div
-                          role="menu"
-                          className="absolute right-0 top-9 z-20 min-w-[9.5rem] overflow-hidden rounded-xl border border-border bg-card py-1 shadow-md"
-                        >
-                          <button
-                            type="button"
-                            role="menuitem"
-                            className="flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm text-destructive hover:bg-secondary"
-                            disabled={deletingThreadId === thread.id}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              void deleteThread(thread.id)
-                            }}
-                          >
-                            <Trash2 className="size-3.5" />
-                            {deletingThreadId === thread.id
-                              ? 'Deleting…'
-                              : 'Delete chat'}
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        {view === 'chat' ? (
-          <>
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4">
-              {historyLoading ? (
-                <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
-                  <MiraAvatar className="mb-3" size="md" />
-                  <p className="text-sm text-muted-foreground">
-                    Loading chat history…
-                  </p>
-                </div>
-              ) : active && active.messages.length === 0 ? (
-                <div className="flex flex-1 flex-col items-center justify-center px-2 text-center">
-                  <div className="mb-3 flex size-11 items-center justify-center overflow-hidden rounded-2xl bg-lime/20">
-                    <img
-                      src={PROJECT_LOGO_URL}
-                      alt="Mera"
-                      className="size-9 object-contain"
-                    />
-                  </div>
-                  <p className="text-base font-semibold text-foreground">
-                    Talk to Autopilot
-                  </p>
-                  <p className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
-                    Say what you want in plain English. I’ll clarify, then ask
-                    you to confirm before doing anything.
-                  </p>
-                  <div className="mt-5 flex w-full flex-col gap-2">
-                    {starterPrompts.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => {
-                          sendMessage(prompt)
-                        }}
-                        className="cursor-pointer rounded-2xl border border-border bg-card px-3 py-2.5 text-left text-xs text-foreground transition hover:bg-secondary"
-                      >
-                        {prompt}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-4">
-                  {active?.messages.map((message) => (
-                    <div
-                      key={message.id}
                       className={cn(
-                        'flex gap-2.5',
+                        'max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
                         message.role === 'user'
-                          ? 'justify-end'
-                          : 'justify-start',
+                          ? 'rounded-br-md bg-lime text-lime-foreground'
+                          : 'rounded-bl-md border border-border bg-card text-foreground',
                       )}
                     >
                       {message.role === 'assistant' ? (
-                        <MiraAvatar className="mt-0.5" />
-                      ) : null}
-                      <div
-                        className={cn(
-                          'max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed',
-                          message.role === 'user'
-                            ? 'rounded-br-md bg-lime text-lime-foreground'
-                            : 'rounded-bl-md border border-border bg-card text-foreground',
-                        )}
-                      >
-                        {message.role === 'assistant' ? (
-                          <ChatMarkdown content={message.content} />
-                        ) : (
-                          message.content
-                        )}
-                      </div>
+                        <ChatMarkdown content={message.content} />
+                      ) : (
+                        message.content
+                      )}
                     </div>
-                  ))}
-                  {typing ? (
-                    <div className="flex items-center gap-2.5">
-                      <MiraAvatar />
-                      <div className="flex gap-1 rounded-2xl border border-border bg-card px-3 py-2.5">
-                        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:120ms]" />
-                        <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:240ms]" />
-                      </div>
+                  </div>
+                ))}
+                {typing ? (
+                  <div className="flex items-center gap-2.5">
+                    <MiraAvatar />
+                    <div className="flex gap-1 rounded-2xl border border-border bg-card px-3 py-2.5">
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50" />
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:120ms]" />
+                      <span className="size-1.5 animate-bounce rounded-full bg-muted-foreground/50 [animation-delay:240ms]" />
                     </div>
-                  ) : null}
-                  <div ref={bottomRef} />
-                </div>
-              )}
-            </div>
+                  </div>
+                ) : null}
+                <div ref={bottomRef} />
+              </div>
+            )}
+          </div>
 
-            <div className="border-t border-border bg-background p-3">
-              <form
-                className="flex items-end gap-2 rounded-2xl border border-border bg-card p-1.5 focus-within:ring-2 focus-within:ring-ring"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  sendMessage(draft)
+          <div className="border-t border-border bg-background p-3">
+            <form
+              className="flex items-end gap-2 rounded-2xl border border-border bg-card p-1.5 focus-within:ring-2 focus-within:ring-ring"
+              onSubmit={(event) => {
+                event.preventDefault()
+                sendMessage(draft)
+              }}
+            >
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={draft}
+                onChange={(event) => {
+                  setDraft(event.target.value)
                 }}
+                onKeyDown={onKeyDown}
+                placeholder="Message Mera…"
+                className="max-h-28 min-h-[40px] flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!draft.trim() || typing}
+                className="mb-0.5 size-10 shrink-0 rounded-xl bg-lime text-lime-foreground hover:bg-lime/90"
+                aria-label="Send"
               >
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  value={draft}
-                  onChange={(event) => {
-                    setDraft(event.target.value)
-                  }}
-                  onKeyDown={onKeyDown}
-                  placeholder="Message Mera…"
-                  className="max-h-28 min-h-[40px] flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  disabled={!draft.trim() || typing}
-                  className="mb-0.5 size-10 shrink-0 rounded-xl bg-lime text-lime-foreground hover:bg-lime/90"
-                  aria-label="Send"
-                >
-                  <ArrowUp className="size-4" strokeWidth={2.5} />
-                </Button>
-              </form>
-            </div>
-          </>
-        ) : null}
-      </aside>
+                <ArrowUp className="size-4" strokeWidth={2.5} />
+              </Button>
+            </form>
+          </div>
+        </>
+      ) : null}
+    </aside>
   )
 }

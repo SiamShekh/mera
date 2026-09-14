@@ -112,3 +112,26 @@
     display: none;
   }
 }
+
+@keyframes ticker-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.ticker-marquee {
+  animation: ticker-marquee 45s linear infinite;
+}
+
+.ticker-marquee:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-marquee {
+    animation: none;
+  }
+}

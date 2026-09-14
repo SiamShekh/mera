@@ -36,9 +36,7 @@ function ChangeText({ change }: { change: number | null }) {
   )
 }
 
-/**
- * All tokenized stocks with live mock-oracle prices (catalog fallback).
- */
+/** All tokenized stocks with live prices. */
 export function MarketList() {
   const { data: priceBook, isFetching, isError, refetch } = useGetPricesQuery()
 
@@ -74,8 +72,7 @@ export function MarketList() {
             Market
           </h1>
           <p className="text-sm text-muted-foreground">
-            {rows.length} stock{rows.length === 1 ? '' : 's'} · updates every
-            10s
+            {rows.length} stock{rows.length === 1 ? '' : 's'} · live prices
           </p>
         </div>
         <Button
@@ -99,7 +96,6 @@ export function MarketList() {
         </p>
       ) : null}
 
-      {/* Mobile rows */}
       <ul className="divide-y divide-border lg:hidden">
         {rows.map((row) => (
           <li
@@ -123,7 +119,6 @@ export function MarketList() {
         ))}
       </ul>
 
-      {/* Desktop table */}
       <div className="hidden lg:block">
         <table className="w-full text-left text-sm">
           <thead>

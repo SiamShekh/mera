@@ -162,14 +162,14 @@ export function SendPage() {
 
   if (status === 'pending') {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="flex flex-1 items-center justify-center">
         <p className="text-sm text-muted-foreground">Loading wallet…</p>
       </div>
     )
   }
 
   return (
-    <div className="flex w-full flex-col items-center px-1 py-6 lg:min-h-[calc(100svh-11rem)] lg:justify-center lg:py-10">
+    <div className="flex w-full flex-1 flex-col items-center justify-center px-1 py-4">
       <section className="w-full max-w-[420px] rounded-3xl border border-border bg-card p-4 shadow-sm sm:p-5">
         {!owner ? (
           <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-10 text-center">
