@@ -800,7 +800,7 @@ function explainMissingBalances(
     if (!hit || !(hit.quantity > 0)) missingPay.push(rule.payAsset)
   }
   if (missingPay.length > 0) {
-    return `I can’t arm buys — missing **${[...new Set(missingPay)].join(', ')}** to pay with. Use **Faucet** on Spot for mock USDC, then reply **yes**.`
+    return `I can’t arm buys — missing **${[...new Set(missingPay)].join(', ')}** to pay with. Use **Faucet** on Swap for mock USDC, then reply **yes**.`
   }
   return null
 }

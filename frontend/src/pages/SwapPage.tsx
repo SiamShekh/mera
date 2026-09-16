@@ -2,7 +2,7 @@ import { PriceTicker } from '@/components/navigation/PriceTicker'
 import { SwapForm } from '@/components/swap/SwapForm'
 
 /**
- * Swap page — centered spot form (mobile ticker above).
+ * Swap page — centered swap form (mobile ticker above).
  */
 export function SwapPage() {
   return (

@@ -39,7 +39,7 @@ const SIDEBAR_SECTIONS: ReadonlyArray<{
   {
     title: 'Trade',
     items: [
-      { kind: 'link', to: '/swap', label: 'Spot', icon: ArrowLeftRight },
+      { kind: 'link', to: '/swap', label: 'Swap', icon: ArrowLeftRight },
       { kind: 'link', to: '/market', label: 'Market', icon: LineChart },
     ],
   },

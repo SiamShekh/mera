@@ -20,6 +20,7 @@ import {
   useCompleteSwapMutation,
   useGetPricesQuery,
   useSwapConfigQuery,
+  useSwapFaucetMutation,
 } from '@/store/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
@@ -30,7 +31,7 @@ type SwapFormProps = {
   className?: string
 }
 
-/** Spot market swap. */
+/** Market swap. */
 export function SwapForm({ className }: SwapFormProps) {
   const client = useClient<AppClient>()
   const wallets = useWallets(client)
@@ -44,6 +45,7 @@ export function SwapForm({ className }: SwapFormProps) {
   })
   const { data: priceBook } = useGetPricesQuery()
   const [completeSwap] = useCompleteSwapMutation()
+  const [swapFaucet] = useSwapFaucetMutation()
 
   const assets = useMemo(() => {
     const priceByMint = new Map(
@@ -71,6 +73,7 @@ export function SwapForm({ className }: SwapFormProps) {
   const [picker, setPicker] = useState<'sell' | 'buy' | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [faucetBusy, setFaucetBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
 
@@ -160,6 +163,30 @@ export function SwapForm({ className }: SwapFormProps) {
       }
     }
     return fallback
+  }
+
+  async function onFaucet() {
+    setError(null)
+    setSuccess(null)
+
+    if (!owner) {
+      setConnectOpen(true)
+      return
+    }
+
+    setFaucetBusy(true)
+    try {
+      await swapFaucet({ userAddress: owner }).unwrap()
+      setSuccess('Faucet sent mock tokens — ready to swap.')
+      void dispatch(loadPortfolio(owner))
+      window.setTimeout(() => {
+        void dispatch(loadPortfolio(owner))
+      }, 2_000)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Faucet failed'))
+    } finally {
+      setFaucetBusy(false)
+    }
   }
 
   async function onSwap() {
@@ -273,6 +300,16 @@ export function SwapForm({ className }: SwapFormProps) {
     <section className={cn('rounded-2xl bg-card p-3 sm:p-4', className)}>
       <div className="mb-3 flex items-center justify-between gap-2">
         <p className="text-sm font-semibold text-foreground">Market</p>
+        <button
+          type="button"
+          disabled={faucetBusy || busy}
+          onClick={() => {
+            void onFaucet()
+          }}
+          className="rounded-full bg-lime px-3 py-1 text-xs font-semibold text-lime-foreground hover:bg-lime/90 disabled:opacity-70"
+        >
+          {faucetBusy ? 'Funding…' : 'Faucet'}
+        </button>
       </div>
 
       <TokenLeg
@@ -326,7 +363,7 @@ export function SwapForm({ className }: SwapFormProps) {
 
       <Button
         type="button"
-        disabled={busy || (Boolean(owner) && !sellAmount)}
+        disabled={busy || faucetBusy || (Boolean(owner) && !sellAmount)}
         onClick={() => {
           if (!owner) {
             setConnectOpen(true)

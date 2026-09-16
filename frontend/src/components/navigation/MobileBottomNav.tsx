@@ -10,7 +10,7 @@ import {
 import { cn } from '@/lib/utils'
 
 const ITEMS = [
-  { to: '/swap', label: 'Spot', icon: ArrowLeftRight },
+  { to: '/swap', label: 'Swap', icon: ArrowLeftRight },
   { to: '/market', label: 'Market', icon: LineChart },
   { to: '/portfolio', label: 'Holdings', icon: Wallet },
   { to: '/deposit', label: 'Deposit', icon: ArrowDownToLine },
