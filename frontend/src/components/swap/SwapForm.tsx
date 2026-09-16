@@ -174,19 +174,48 @@ export function SwapForm({ className }: SwapFormProps) {
       return
     }
 
+    const usdcMint = assets.find((asset) => asset.symbol === 'USDC')?.mint ?? ''
+    const before = findAvailableHolding(holdings, usdcMint)?.quantity ?? 0
+
     setFaucetBusy(true)
     try {
-      await swapFaucet({ userAddress: owner }).unwrap()
-      setSuccess('Faucet sent mock tokens — ready to swap.')
-      void dispatch(loadPortfolio(owner))
-      window.setTimeout(() => {
-        void dispatch(loadPortfolio(owner))
-      }, 2_000)
+      const result = await swapFaucet({ userAddress: owner }).unwrap()
+      if (usdcMint) {
+        setSellMintOverride(usdcMint)
+      }
+      await waitForUsdcCredit(owner, usdcMint, before)
+      setSuccess(
+        `Received ${result.usdcAmount.toLocaleString()} USDC — ready to swap.`,
+      )
     } catch (err) {
-      setError(apiErrorMessage(err, 'Faucet failed'))
+      const credited = await waitForUsdcCredit(owner, usdcMint, before)
+      if (credited) {
+        setSuccess('Received 5,000 USDC — ready to swap.')
+      } else {
+        setError(apiErrorMessage(err, 'Faucet failed'))
+      }
     } finally {
       setFaucetBusy(false)
     }
+  }
+
+  async function waitForUsdcCredit(
+    address: string,
+    usdcMint: string,
+    before: number,
+  ): Promise<boolean> {
+    for (let i = 0; i < 10; i += 1) {
+      const loaded = await dispatch(loadPortfolio(address))
+      if (loadPortfolio.fulfilled.match(loaded)) {
+        const next =
+          findAvailableHolding(loaded.payload.holdings, usdcMint)?.quantity ?? 0
+        if (next > before + 1) {
+          return true
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400))
+    }
+    return false
   }
 
   async function onSwap() {
@@ -306,9 +335,10 @@ export function SwapForm({ className }: SwapFormProps) {
           onClick={() => {
             void onFaucet()
           }}
+          aria-label="Get 5000 USDC from faucet"
           className="rounded-full bg-lime px-3 py-1 text-xs font-semibold text-lime-foreground hover:bg-lime/90 disabled:opacity-70"
         >
-          {faucetBusy ? 'Funding…' : 'Faucet'}
+          {faucetBusy ? 'Sending USDC…' : 'Faucet · $5k USDC'}
         </button>
       </div>
 

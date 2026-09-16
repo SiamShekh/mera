@@ -442,6 +442,7 @@ async function sendAuthorityTx(
   connection: Connection,
   authority: Keypair,
   build: () => Transaction,
+  skipPreflight = false,
 ): Promise<string> {
   let lastError: unknown
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -455,7 +456,7 @@ async function sendAuthorityTx(
       tx.sign(authority)
 
       signature = await connection.sendRawTransaction(tx.serialize(), {
-        skipPreflight: false,
+        skipPreflight: skipPreflight || attempt > 0,
         maxRetries: 3,
         preflightCommitment: 'confirmed',
       })
@@ -545,9 +546,12 @@ export async function payoutBuyTokens(options: {
   })
 }
 
+/** Demo faucet — mint mock USDC to the connected wallet (authority-signed). */
+export const FAUCET_USDC_AMOUNT = 5_000
+
 /**
- * Optional demo faucet — mint a starter bag + drip Devnet SOL for fees.
- * Batches into multiple txs (token ATA + mintTo pairs blow the size limit).
+ * Mint 5,000 mock USDC on-chain. Authority pays rent + fees, so the user
+ * never signs. Also drips Devnet SOL when the wallet cannot pay swap fees.
  */
 export async function faucetMockTokens(options: {
   connection: Connection
@@ -555,34 +559,34 @@ export async function faucetMockTokens(options: {
   userAddress: string
   tokens: SwapToken[]
 }): Promise<string> {
-  const user = new PublicKey(options.userAddress)
-  const authority = options.authority.publicKey
-
-  const amounts: Record<string, number> = {
-    USDC: 1_000,
-    NVDAx: 5,
-    SOLx: 2,
-    stX: 2,
-    ...Object.fromEntries(
-      XSTOCKS_CATALOG.map((row) => [row.symbol, row.faucetAmount]),
-    ),
+  const usdc = options.tokens.find((token) => token.symbol === 'USDC')
+  if (!usdc) {
+    throw new Error('USDC mint is not configured.')
   }
 
-  /** Enough for several deposit txs; skip if wallet already funded. */
-  const FAUCET_SOL_LAMPORTS = 50_000_000 // 0.05 SOL
-  const MIN_SOL_LAMPORTS = 10_000_000 // 0.01 SOL
-  const TOKENS_PER_TX = 4
+  const user = new PublicKey(options.userAddress)
+  const authority = options.authority.publicKey
+  const mint = new PublicKey(usdc.mint)
+  const userAta = getAssociatedTokenAddressSync(
+    mint,
+    user,
+    false,
+    TOKEN_PROGRAM_ID,
+  )
+  const raw = BigInt(Math.round(FAUCET_USDC_AMOUNT * 10 ** usdc.decimals))
+
+  /** Enough for several swap deposit txs; skip if the wallet already has SOL. */
+  const FAUCET_SOL_LAMPORTS = 100_000_000 // 0.1 SOL
+  const MIN_SOL_LAMPORTS = 20_000_000 // 0.02 SOL
   const solBalance = await options.connection.getBalance(user)
   const needsSol = solBalance < MIN_SOL_LAMPORTS
 
-  const signatures: string[] = []
-
-  if (needsSol) {
-    const solSig = await sendAuthorityTx(
-      options.connection,
-      options.authority,
-      () => {
-        const tx = new Transaction()
+  return sendAuthorityTx(
+    options.connection,
+    options.authority,
+    () => {
+      const tx = new Transaction()
+      if (needsSol) {
         tx.add(
           SystemProgram.transfer({
             fromPubkey: authority,
@@ -590,48 +594,28 @@ export async function faucetMockTokens(options: {
             lamports: FAUCET_SOL_LAMPORTS,
           }),
         )
-        return tx
-      },
-    )
-    signatures.push(solSig)
-  }
-
-  for (let i = 0; i < options.tokens.length; i += TOKENS_PER_TX) {
-    const batch = options.tokens.slice(i, i + TOKENS_PER_TX)
-    const sig = await sendAuthorityTx(
-      options.connection,
-      options.authority,
-      () => {
-        const tx = new Transaction()
-        for (const token of batch) {
-          const ui = amounts[token.symbol] ?? 1
-          const raw = BigInt(Math.round(ui * 10 ** token.decimals))
-          const mint = new PublicKey(token.mint)
-          const userAta = getAssociatedTokenAddressSync(mint, user)
-          tx.add(
-            createAssociatedTokenAccountIdempotentInstruction(
-              authority,
-              userAta,
-              user,
-              mint,
-            ),
-            createMintToInstruction(
-              mint,
-              userAta,
-              authority,
-              raw,
-              [],
-              TOKEN_PROGRAM_ID,
-            ),
-          )
-        }
-        return tx
-      },
-    )
-    signatures.push(sig)
-  }
-
-  return signatures[signatures.length - 1] ?? signatures[0]
+      }
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          authority,
+          userAta,
+          user,
+          mint,
+          TOKEN_PROGRAM_ID,
+        ),
+        createMintToInstruction(
+          mint,
+          userAta,
+          authority,
+          raw,
+          [],
+          TOKEN_PROGRAM_ID,
+        ),
+      )
+      return tx
+    },
+    true,
+  )
 }
 
 function roundAmount(value: number, decimals: number): number {

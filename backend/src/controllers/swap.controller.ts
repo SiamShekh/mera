@@ -2,6 +2,7 @@ import { AppError } from '../errors'
 import { SwapDeposit } from '../models'
 import {
   assertDepositTransfer,
+  FAUCET_USDC_AMOUNT,
   faucetMockTokens,
   getConnection,
   listConfiguredSwapTokens,
@@ -218,8 +219,9 @@ export const swapController = {
 
   async faucet(env: Bindings, body: SwapFaucetBody) {
     const tokens = listConfiguredSwapTokens(env)
-    if (tokens.length === 0) {
-      throw new AppError(503, 'No mock mints configured on the backend.')
+    const usdc = tokens.find((token) => token.symbol === 'USDC')
+    if (!usdc) {
+      throw new AppError(503, 'USDC mint is not configured on the backend.')
     }
 
     try {
@@ -231,7 +233,10 @@ export const swapController = {
         userAddress: body.userAddress,
         tokens,
       })
-      return { ok: true as const, signature }
+      console.log(
+        `[faucet] minted ${FAUCET_USDC_AMOUNT} USDC → ${body.userAddress} ${signature}`,
+      )
+      return { ok: true as const, signature, usdcAmount: FAUCET_USDC_AMOUNT }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Faucet failed'
       throw new AppError(502, message)

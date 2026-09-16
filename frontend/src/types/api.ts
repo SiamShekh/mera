@@ -242,6 +242,7 @@ export type SwapCompleteResponse = {
 export type SwapFaucetResponse = {
   ok: true
   signature: string
+  usdcAmount: number
 }
 
 export type LivePrice = {

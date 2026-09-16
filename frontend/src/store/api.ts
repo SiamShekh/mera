@@ -225,6 +225,7 @@ export const api = createApi({
         url: '/swap/faucet',
         method: 'POST',
         body,
+        timeout: 90_000,
       }),
     }),
 
