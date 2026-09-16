@@ -120,4 +120,28 @@ describe('portfolio analytics', () => {
     expect(solDiff?.allocationBefore).toBe(80)
     expect(solDiff?.allocationAfter).toBe(75)
   })
+
+  it('treats locked escrow as the same net worth', () => {
+    const available = makeHolding({
+      ...usdc,
+      quantity: 20,
+      value: 20,
+      allocation: 8,
+    })
+    const locked = makeHolding({
+      ...usdc,
+      quantity: 30,
+      value: 30,
+      allocation: 12,
+      locked: true,
+    })
+    const snapshot = createSnapshot('Wallet111', [sol, usdc])
+    const diff = diffPortfolios(snapshot, [sol, available, locked])
+
+    expect(diff.totalValueAfter).toBe(250)
+    expect(diff.totalValueChange).toBe(0)
+    const usdcDiff = diff.changed.find((row) => row.mint === 'usdc-mint')
+    expect(usdcDiff?.quantityChange).toBe(0)
+    expect(usdcDiff?.valueChange).toBe(0)
+  })
 })

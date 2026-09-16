@@ -91,7 +91,9 @@ export function interpretRule(rule: CompiledRule, prompt?: string): string {
 export function interpretRules(rules: CompiledRule[], prompt?: string): string {
   if (rules.length === 0) return ''
   if (rules.length === 1) return interpretRule(rules[0], prompt)
-  return rules.map((rule, i) => `${i + 1}. ${interpretRule(rule)}`).join(' ')
+  return rules
+    .map((rule, i) => `${i + 1}. ${interpretRule(rule)}`)
+    .join('\n\n')
 }
 
 function formatMeasure(unit: 'percent' | 'amount', value: number): string {

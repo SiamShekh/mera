@@ -42,6 +42,7 @@ Field rules:
 - Do NOT use rule types for deploying a Portfolio PDA — that is a vault setup action, not a rule.
 
 Reject (return {"rejection":{"code":"...","message":"..."}}) when:
+- cancel / delete / unlock an existing order (Autopilot chat handles that separately — this compiler only creates rules)
 - ambiguous / vague (e.g. "manage my portfolio", "be careful with risk")
 - unsafe / unsupported (leverage, shorts, loans, drain wallet off-app, rug)
 - missing asset or numeric details needed to compile

@@ -1,11 +1,29 @@
 import { AppError } from '../errors'
 import { leanRequired } from '../models/lean'
 import { RuleModel, User, type Rule } from '../models'
+import {
+  getConnection,
+  listConfiguredSwapTokens,
+  loadSwapAuthority,
+  payoutBuyTokens,
+} from '../solana/mockSwap'
+import { getPriceMap } from '../solana/priceEngine'
+import type { Bindings } from '../types/env'
 import type {
   CreateRuleBody,
   ListRulesQuery,
   UpdateRuleBody,
 } from '../validators/rule'
+
+export type CancelRuleResult = {
+  ok: true
+  ruleId: string
+  refunded: boolean
+  refundedAmount: number | null
+  refundMint: string | null
+  refundSymbol: string | null
+  refundSignature: string | null
+}
 
 /**
  * Rules feature controller — create/list/get/update/delete against Mongo.
@@ -65,6 +83,15 @@ export const rulesController = {
     return rows.map((row) => leanRequired<Rule>(row))
   },
 
+  /** Unfilled rules — still live, including escrowed Autopilot orders. */
+  async listOpen(userAddress: string): Promise<Rule[]> {
+    const rows = await RuleModel.find({
+      userAddress,
+      executedAt: null,
+    }).sort({ createdAt: -1 })
+    return rows.map((row) => leanRequired<Rule>(row))
+  },
+
   async getById(id: string): Promise<Rule> {
     const rule = await RuleModel.findOne({ id })
     if (!rule) {
@@ -106,5 +133,78 @@ export const rulesController = {
     await this.getById(id)
     await RuleModel.deleteOne({ id })
     return { ok: true as const }
+  },
+
+  /**
+   * Cancel an unfilled rule and mint escrowed tokens back to the user's
+   * spendable wallet (mock treasury keeps the original deposit).
+   */
+  async cancel(
+    env: Bindings,
+    id: string,
+    userAddress: string,
+  ): Promise<CancelRuleResult> {
+    const rule = await this.getById(id)
+    if (rule.userAddress !== userAddress) {
+      throw new AppError(403, 'Rule belongs to another wallet')
+    }
+    if (rule.executedAt) {
+      throw new AppError(
+        409,
+        'This order already filled — nothing left to cancel.',
+      )
+    }
+
+    const now = new Date().toISOString()
+    await RuleModel.updateOne(
+      { id },
+      { $set: { status: 'paused', updatedAt: now } },
+    )
+
+    let refundSignature: string | null = null
+    let refundedAmount: number | null = null
+    let refundMint: string | null = null
+    let refundSymbol: string | null = null
+
+    const amount = Number(rule.escrowSellAmount)
+    const mint = rule.mint
+    if (mint && Number.isFinite(amount) && amount > 0) {
+      try {
+        const priceMap = await getPriceMap(env)
+        const tokens = listConfiguredSwapTokens(env, priceMap)
+        const token = tokens.find((row) => row.mint === mint)
+        const connection = getConnection(env)
+        const authority = loadSwapAuthority(env)
+        refundSignature = await payoutBuyTokens({
+          connection,
+          authority,
+          userAddress,
+          buyMint: mint,
+          buyAmountUi: amount,
+          decimals: token?.decimals ?? 6,
+        })
+        refundedAmount = amount
+        refundMint = mint
+        refundSymbol = token?.symbol ?? rule.payAsset ?? rule.asset
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Refund transfer failed'
+        throw new AppError(
+          502,
+          `Couldn’t return locked tokens to your wallet (${message}). The order is paused — try Cancel again.`,
+        )
+      }
+    }
+
+    await RuleModel.deleteOne({ id })
+    return {
+      ok: true as const,
+      ruleId: id,
+      refunded: Boolean(refundSignature),
+      refundedAmount,
+      refundMint,
+      refundSymbol,
+      refundSignature,
+    }
   },
 }

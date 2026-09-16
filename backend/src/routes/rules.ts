@@ -1,14 +1,17 @@
 import { Router } from 'express'
 
+import { env } from '../config/env'
 import { rulesController } from '../controllers/rules.controller'
 import { zodValidate } from '../middleware/zodValidate'
 import {
+  cancelRuleBodySchema,
   createRuleBodySchema,
   listRulesQuerySchema,
   ruleIdParamSchema,
   updateRuleBodySchema,
 } from '../validators/rule'
 import type {
+  CancelRuleBody,
   CreateRuleBody,
   ListRulesQuery,
   UpdateRuleBody,
@@ -72,6 +75,22 @@ rulesRouter.patch(
         req.validated!.body as UpdateRuleBody,
       )
       res.json({ rule })
+    } catch (error) {
+      next(error)
+    }
+  },
+)
+
+rulesRouter.post(
+  '/:id/cancel',
+  zodValidate('params', ruleIdParamSchema),
+  zodValidate('body', cancelRuleBodySchema),
+  async (req, res, next) => {
+    try {
+      const { id } = req.validated!.params as { id: string }
+      const { userAddress } = req.validated!.body as CancelRuleBody
+      const result = await rulesController.cancel(env(), id, userAddress)
+      res.json(result)
     } catch (error) {
       next(error)
     }

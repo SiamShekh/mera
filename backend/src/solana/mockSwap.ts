@@ -142,6 +142,47 @@ export function quoteSwap(options: {
   }
 }
 
+/**
+ * Size the pay (sell) leg so a target share count can settle exactly.
+ * Ceils pay amount to token decimals so floor-based payouts never undershoot.
+ */
+export function quoteSwapForBuyAmount(options: {
+  tokens: SwapToken[]
+  sellMint: string
+  buyMint: string
+  buyAmount: number
+}): {
+  sellAmount: number
+  buyAmount: number
+  rate: number
+  sellUsd: number
+  buyUsd: number
+} {
+  const sell = options.tokens.find((t) => t.mint === options.sellMint)
+  const buy = options.tokens.find((t) => t.mint === options.buyMint)
+  if (!sell || !buy) {
+    throw new Error('Unknown sell or buy mint')
+  }
+  if (sell.mint === buy.mint) {
+    throw new Error('Choose two different tokens')
+  }
+  if (!(options.buyAmount > 0) || !Number.isFinite(options.buyAmount)) {
+    throw new Error('Enter a valid buy amount')
+  }
+  if (!(buy.priceUsd > 0) || !(sell.priceUsd > 0)) {
+    throw new Error('Missing prices for quote')
+  }
+
+  const buyAmount = quantizeAmount(options.buyAmount, buy.decimals)
+  const buyUsd = buyAmount * buy.priceUsd
+  const rawSell = buyUsd / sell.priceUsd
+  const sellAmount = ceilAmount(rawSell, sell.decimals)
+  const sellUsd = sellAmount * sell.priceUsd
+  const rate = sell.priceUsd / buy.priceUsd
+
+  return { sellAmount, buyAmount, rate, sellUsd, buyUsd }
+}
+
 export function loadSwapAuthority(env: Bindings): Keypair {
   const secret = env.SWAP_AUTHORITY_SECRET?.trim()
   if (!secret) {
@@ -596,4 +637,15 @@ export async function faucetMockTokens(options: {
 function roundAmount(value: number, decimals: number): number {
   const scale = 10 ** Math.min(decimals, 8)
   return Math.floor(value * scale) / scale
+}
+
+function ceilAmount(value: number, decimals: number): number {
+  const scale = 10 ** Math.min(decimals, 8)
+  return Math.ceil(value * scale - 1e-12) / scale
+}
+
+/** Preserve whole-share buys (1, 10) without float drift; floor dust only. */
+function quantizeAmount(value: number, decimals: number): number {
+  const scale = 10 ** Math.min(decimals, 8)
+  return Math.round(value * scale) / scale
 }

@@ -3,6 +3,7 @@ import {
   runAutopilotAgent,
   type AutopilotAgentResult,
 } from '../ai/autopilot-agent'
+import type { OpenOrderHint } from '../ai/cancel'
 import {
   compileNaturalLanguageRule,
   validateEditedRule,
@@ -50,6 +51,23 @@ export const aiController = {
     env: Bindings,
     body: AutopilotTurnBody,
   ): Promise<AutopilotAgentResult> {
+    const openRules = body.userAddress
+      ? await rulesController.listOpen(body.userAddress)
+      : []
+    const openOrders: OpenOrderHint[] = openRules.map((rule) => ({
+      id: rule.id,
+      type: rule.type,
+      asset: rule.asset,
+      payAsset: rule.payAsset,
+      value: rule.value,
+      unit: rule.unit,
+      actionValue: rule.actionValue,
+      limitPrice: rule.limitPrice,
+      escrowAmount: rule.escrowSellAmount,
+      escrowMint: rule.mint,
+      prompt: rule.prompt,
+    }))
+
     return runAutopilotAgent(env, {
       message: body.message,
       history: body.history,
@@ -57,6 +75,8 @@ export const aiController = {
       walletConnected: body.walletConnected,
       pendingRule: body.pendingRule,
       pendingRules: body.pendingRules,
+      pendingCancelIds: body.pendingCancelIds,
+      openOrders,
     })
   },
 

@@ -178,6 +178,10 @@ export const ruleIdParamSchema = z.object({
   id: z.string().uuid('Invalid rule id'),
 })
 
+export const cancelRuleBodySchema = z.object({
+  userAddress: solanaAddressSchema,
+})
+
 export const updateRuleBodySchema = z
   .object({
     status: z.enum(['draft', 'active', 'paused']).optional(),
@@ -224,3 +228,4 @@ export const updateRuleBodySchema = z
 export type CreateRuleBody = z.infer<typeof createRuleBodySchema>
 export type UpdateRuleBody = z.infer<typeof updateRuleBodySchema>
 export type ListRulesQuery = z.infer<typeof listRulesQuerySchema>
+export type CancelRuleBody = z.infer<typeof cancelRuleBodySchema>

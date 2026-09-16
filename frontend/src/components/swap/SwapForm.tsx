@@ -24,7 +24,7 @@ import {
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
 import { PORTFOLIO_REFRESH_EVENT } from '@/lib/portfolioRefresh'
-import type { Holding } from '@/types/holding'
+import { findAvailableHolding, type Holding } from '@/types/holding'
 
 type SwapFormProps = {
   className?: string
@@ -109,12 +109,12 @@ export function SwapForm({ className }: SwapFormProps) {
     assets[1]
 
   const sellHolding = useMemo(
-    () => holdings.find((row) => row.mint === sellAsset?.mint) ?? null,
+    () => findAvailableHolding(holdings, sellAsset?.mint ?? ''),
     [holdings, sellAsset?.mint],
   )
 
   const buyBalance = useMemo(
-    () => holdings.find((row) => row.mint === buyAsset?.mint)?.quantity ?? 0,
+    () => findAvailableHolding(holdings, buyAsset?.mint ?? '')?.quantity ?? 0,
     [holdings, buyAsset?.mint],
   )
 

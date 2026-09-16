@@ -8,6 +8,8 @@ export const swapCompleteBodySchema = z.object({
   buyMint: z.string().min(32).max(64),
   sellAmount: z.number().positive().max(1_000_000_000),
   depositSignature: z.string().min(64).max(128),
+  /** When set, mint this many buy tokens if the deposit covers the live quote. */
+  exactBuyAmount: z.number().positive().max(1_000_000_000).optional(),
 })
 
 export const swapFaucetBodySchema = z.object({

@@ -8,7 +8,7 @@ import {
 } from '@/lib/mints'
 import { TOKEN_ICONS } from '@/lib/tokenIcons'
 import { XSTOCKS_CATALOG } from '@/data/xstocks'
-import type { Holding } from '@/types/holding'
+import { holdingListId, type Holding } from '@/types/holding'
 
 /** Wrapped SOL mint — used for USD price / icon lookups */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112'
@@ -277,50 +277,119 @@ function tokenIcon(mint: string, marketIcon: string | null): string | null {
   return marketIcon ?? KNOWN_ICONS[mint] ?? null
 }
 
+type WalletBalance = {
+  mint: string
+  quantity: number
+  decimals: number
+  tokenProgram: string | null
+}
+
+export type LockedLot = {
+  mint: string
+  quantity: number
+  ruleId?: string | null
+}
+
+export type BalanceLot = WalletBalance & {
+  locked: boolean
+  ruleId?: string | null
+}
+
+function knownDecimals(mint: string): number {
+  if (mint === 'native' || mint === WSOL_MINT) {
+    return 9
+  }
+  const stock = XSTOCKS_CATALOG.find((row) => row.mint === mint)
+  if (stock) {
+    return stock.decimals
+  }
+  return 6
+}
+
 /**
- * Load holdings for a connected wallet address.
- * 1) Read SOL + SPL balances from the chain (Devnet RPC)
- * 2) Apply fixed mock USD prices for demo mints
- * 3) Compute USD value, SOL value, and allocation %
+ * Wallet lots stay spendable. Escrowed lots become extra locked rows so
+ * net worth still includes money sitting in treasury.
+ * Autopilot lots with a ruleId stay separate so each order can be cancelled.
  */
-export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
-  const solQuantity = await getSolQuantity(ownerAddress)
-  const splRows = await getSplTokenRows(ownerAddress)
+export function mergeWalletAndLocked(
+  wallet: WalletBalance[],
+  locked: LockedLot[],
+): BalanceLot[] {
+  const walletByMint = new Map(wallet.map((row) => [row.mint, row]))
+  const rows: BalanceLot[] = wallet
+    .filter((row) => row.quantity > 0)
+    .map((row) => ({ ...row, locked: false }))
 
-  const raw: Array<{
-    mint: string
-    quantity: number
-    decimals: number
-    tokenProgram: string | null
-  }> = []
+  const swapLockedByMint = new Map<string, number>()
+  for (const lot of locked) {
+    if (!lot.mint || !(lot.quantity > 0)) {
+      continue
+    }
+    if (lot.ruleId) {
+      const walletRow = walletByMint.get(lot.mint)
+      rows.push({
+        mint: lot.mint,
+        quantity: lot.quantity,
+        decimals: walletRow?.decimals ?? knownDecimals(lot.mint),
+        tokenProgram:
+          walletRow?.tokenProgram ??
+          (lot.mint === 'native' ? null : TOKEN_PROGRAM_ID),
+        locked: true,
+        ruleId: lot.ruleId,
+      })
+      continue
+    }
+    swapLockedByMint.set(
+      lot.mint,
+      (swapLockedByMint.get(lot.mint) ?? 0) + lot.quantity,
+    )
+  }
 
-  if (solQuantity > 0) {
-    raw.push({
-      mint: 'native',
-      quantity: solQuantity,
-      decimals: 9,
-      tokenProgram: null,
+  for (const [mint, quantity] of swapLockedByMint) {
+    const walletRow = walletByMint.get(mint)
+    rows.push({
+      mint,
+      quantity,
+      decimals: walletRow?.decimals ?? knownDecimals(mint),
+      tokenProgram:
+        walletRow?.tokenProgram ?? (mint === 'native' ? null : TOKEN_PROGRAM_ID),
+      locked: true,
     })
   }
-  raw.push(...splRows)
 
-  if (raw.length === 0) {
+  return rows
+}
+
+async function fetchLockedLots(ownerAddress: string): Promise<LockedLot[]> {
+  try {
+    const response = await fetch(
+      `${API_URL}/portfolio/locked?userAddress=${encodeURIComponent(ownerAddress)}`,
+    )
+    if (!response.ok) {
+      return []
+    }
+    const json = (await response.json()) as { locked?: LockedLot[] }
+    return json.locked ?? []
+  } catch {
     return []
   }
+}
 
-  const markets = await fetchTokenMarkets(raw.map((row) => row.mint))
-  const solUsd = markets.native?.priceUsd ?? markets[WSOL_MINT]?.priceUsd ?? 0
-
+function valueHoldings(
+  raw: BalanceLot[],
+  markets: Record<string, TokenMarket>,
+  solUsd: number,
+): Holding[] {
   const withValues = raw.map((row) => {
     const market =
       markets[row.mint] ?? markets[row.mint === 'native' ? WSOL_MINT : row.mint]
     const price = market?.priceUsd ?? 0
     const value = row.quantity * price
-    // Convert USD value → SOL (for SOL itself, this equals quantity when priced)
     const valueInSol =
       solUsd > 0 ? value / solUsd : row.mint === 'native' ? row.quantity : 0
 
     return {
+      id: holdingListId(row.mint, row.locked, row.ruleId),
       asset: assetName(row.mint, market?.symbol ?? null),
       quantity: row.quantity,
       decimals: row.decimals,
@@ -331,18 +400,65 @@ export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
       valueInSol,
       mint: row.mint,
       icon: tokenIcon(row.mint, market?.icon ?? null),
+      locked: row.locked,
+      ruleId: row.ruleId ?? null,
     }
   })
 
   const totalValue = withValues.reduce((sum, row) => sum + row.value, 0)
+  const valueByMint = new Map<string, number>()
+  for (const row of withValues) {
+    valueByMint.set(row.mint, (valueByMint.get(row.mint) ?? 0) + row.value)
+  }
 
   const holdings: Holding[] = withValues.map((row) => ({
     ...row,
-    // Percent of portfolio by USD value
     allocation: totalValue > 0 ? (row.value / totalValue) * 100 : 0,
   }))
 
-  holdings.sort((a, b) => b.value - a.value)
+  holdings.sort((a, b) => {
+    const mintValueA = valueByMint.get(a.mint) ?? 0
+    const mintValueB = valueByMint.get(b.mint) ?? 0
+    if (mintValueA !== mintValueB) {
+      return mintValueB - mintValueA
+    }
+    return Number(a.locked) - Number(b.locked)
+  })
 
   return holdings
+}
+
+/**
+ * Load holdings for a connected wallet address.
+ * 1) Read SOL + SPL balances from the chain (Devnet RPC)
+ * 2) Re-add Autopilot / in-flight swap escrow as locked rows
+ * 3) Apply USD prices and allocation %
+ */
+export async function fetchHoldings(ownerAddress: string): Promise<Holding[]> {
+  const [solQuantity, splRows, lockedLots] = await Promise.all([
+    getSolQuantity(ownerAddress),
+    getSplTokenRows(ownerAddress),
+    fetchLockedLots(ownerAddress),
+  ])
+
+  const wallet: WalletBalance[] = []
+
+  if (solQuantity > 0) {
+    wallet.push({
+      mint: 'native',
+      quantity: solQuantity,
+      decimals: 9,
+      tokenProgram: null,
+    })
+  }
+  wallet.push(...splRows)
+
+  const raw = mergeWalletAndLocked(wallet, lockedLots)
+  if (raw.length === 0) {
+    return []
+  }
+
+  const markets = await fetchTokenMarkets(raw.map((row) => row.mint))
+  const solUsd = markets.native?.priceUsd ?? markets[WSOL_MINT]?.priceUsd ?? 0
+  return valueHoldings(raw, markets, solUsd)
 }

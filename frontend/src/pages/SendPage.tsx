@@ -20,7 +20,7 @@ import {
 import type { AppClient } from '@/lib/solanaClient'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
-import type { Holding } from '@/types/holding'
+import { availableHoldings, findAvailableHolding, type Holding } from '@/types/holding'
 
 type LocalActivity = {
   id: string
@@ -65,13 +65,15 @@ export function SendPage() {
     void dispatch(loadPortfolio(owner))
   }, [dispatch, owner])
 
+  const spendable = useMemo(() => availableHoldings(holdings), [holdings])
+
   const activeMint =
-    selectedMint && holdings.some((row) => row.mint === selectedMint)
+    selectedMint && spendable.some((row) => row.mint === selectedMint)
       ? selectedMint
-      : (holdings[0]?.mint ?? 'native')
+      : (spendable[0]?.mint ?? 'native')
 
   const selected = useMemo(
-    () => holdings.find((row) => row.mint === activeMint) ?? null,
+    () => findAvailableHolding(holdings, activeMint),
     [holdings, activeMint],
   )
 
@@ -244,12 +246,12 @@ export function SendPage() {
                   </button>
                   {pickerOpen ? (
                     <div className="absolute top-full left-0 z-20 mt-2 max-h-56 w-48 overflow-y-auto rounded-2xl border border-border bg-card p-1 shadow-lg">
-                      {holdings.length === 0 ? (
+                      {spendable.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-muted-foreground">
                           No balances
                         </p>
                       ) : (
-                        holdings.map((row) => (
+                        spendable.map((row) => (
                           <button
                             key={row.mint}
                             type="button"

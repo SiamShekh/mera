@@ -4,6 +4,7 @@ import { aiRouter } from './ai'
 import { chatRouter } from './chat'
 import { healthRouter } from './health'
 import { keeperRouter } from './keeper'
+import { portfolioRouter } from './portfolio'
 import { pricesRouter } from './prices'
 import { rulesRouter } from './rules'
 import { swapRouter } from './swap'
@@ -13,6 +14,7 @@ export const routes = Router()
 
 routes.use('/health', healthRouter)
 routes.use('/users', usersRouter)
+routes.use('/portfolio', portfolioRouter)
 routes.use('/rules', rulesRouter)
 routes.use('/ai', aiRouter)
 routes.use('/chat', chatRouter)

@@ -11,6 +11,7 @@ import type {
   CompiledRule,
   CompileResult,
   ConfirmRuleResponse,
+  CancelRuleResponse,
   CreateChatThreadResponse,
   CreateRuleBody,
   GetChatThreadResponse,
@@ -64,6 +65,18 @@ export const api = createApi({
       query: ({ id }) => ({
         url: `/rules/${id}`,
         method: 'DELETE',
+      }),
+      invalidatesTags: ['Rules'],
+    }),
+
+    cancelRule: builder.mutation<
+      CancelRuleResponse,
+      { id: string; userAddress: string }
+    >({
+      query: ({ id, userAddress }) => ({
+        url: `/rules/${id}/cancel`,
+        method: 'POST',
+        body: { userAddress },
       }),
       invalidatesTags: ['Rules'],
     }),
@@ -265,6 +278,7 @@ export const {
   useCreateRuleMutation,
   useListRulesQuery,
   useDeleteRuleMutation,
+  useCancelRuleMutation,
   useCompileRuleMutation,
   useValidateCompiledRuleMutation,
   useConfirmRuleMutation,

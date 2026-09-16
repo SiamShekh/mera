@@ -13,6 +13,7 @@ import {
   useAppendChatMessageMutation,
   useArmAutopilotMutation,
   useAutopilotTurnMutation,
+  useCancelRuleMutation,
   useConfirmRuleMutation,
   useCreateChatThreadMutation,
   useDeleteChatThreadMutation,
@@ -161,7 +162,21 @@ function normalizeHoldingSymbol(raw: string): string {
 function findSellHolding(holdings: Holding[], asset: string): Holding | null {
   const want = normalizeHoldingSymbol(asset)
   return (
-    holdings.find((row) => normalizeHoldingSymbol(row.asset) === want) ?? null
+    holdings.find(
+      (row) =>
+        !row.locked && normalizeHoldingSymbol(row.asset) === want,
+    ) ?? null
+  )
+}
+
+function holdingsSummary(holdings: Holding[]): string {
+  return (
+    holdings
+      .map(
+        (row) =>
+          `${row.asset} ${row.quantity}${row.locked ? ' (locked)' : ''}`,
+      )
+      .join(', ') || 'nothing'
   )
 }
 
@@ -199,6 +214,32 @@ function computeSellUiAmount(
   return { uiAmount: exact, uiNumber: Number(exact) }
 }
 
+/** Ceil UI amount so share buys never undersize the USDC escrow. */
+function ceilUiAmount(amount: number, decimals: number): string {
+  const scale = 10 ** Math.min(Math.max(decimals, 0), 9)
+  const raw = Math.ceil(amount * scale - 1e-12)
+  return (raw / scale).toFixed(decimals)
+}
+
+/**
+ * USDC (or pay asset) needed to buy an exact share count at live prices.
+ * Adds a small buffer so a price tick during wallet approve still covers exact settlement.
+ */
+function payUiForExactBuy(options: {
+  shareCount: number
+  buyPriceUsd: number
+  payPriceUsd: number
+  decimals: number
+  bufferBps?: number
+}): { uiAmount: string; uiNumber: number } {
+  const { shareCount, buyPriceUsd, payPriceUsd, decimals } = options
+  const bufferBps = options.bufferBps ?? 150 // 1.5% — covers live ticks during wallet approve
+  const raw = (shareCount * buyPriceUsd) / payPriceUsd
+  const buffered = raw * (1 + bufferBps / 10_000)
+  const uiAmount = ceilUiAmount(buffered, decimals)
+  return { uiAmount, uiNumber: Number(uiAmount) }
+}
+
 /**
  * Mera AI chat as part of the app shell:
  * - Desktop: right layout column that shrinks main content when open
@@ -213,6 +254,7 @@ export function MeraChatDrawer() {
   const holdings = useAppSelector((state) => state.portfolio.holdings)
   const [autopilotTurn] = useAutopilotTurnMutation()
   const [confirmRule] = useConfirmRuleMutation()
+  const [cancelRule] = useCancelRuleMutation()
   const [armAutopilot] = useArmAutopilotMutation()
   const [createChatThread] = useCreateChatThreadMutation()
   const [appendChatMessage] = useAppendChatMessageMutation()
@@ -236,80 +278,163 @@ export function MeraChatDrawer() {
   const [menuThreadId, setMenuThreadId] = useState<string | null>(null)
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null)
   const [pendingRules, setPendingRules] = useState<CompiledRule[]>([])
+  const [pendingCancelIds, setPendingCancelIds] = useState<string[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const activeIdRef = useRef(activeId)
+  const threadsRef = useRef(threads)
   const threadRemapRef = useRef<Map<string, string>>(new Map())
   const historyMenuRef = useRef<HTMLDivElement>(null)
   activeIdRef.current = activeId
+  threadsRef.current = threads
 
   const active = threads.find((t) => t.id === activeId) ?? threads[0]
   const ownerAddress = connected?.account.address
 
-  // Load persisted threads when a wallet connects.
+  // Load persisted threads when a wallet connects; migrate any in-progress guest chat.
   useEffect(() => {
     if (!ownerAddress) {
       return
     }
     let cancelled = false
-    setHistoryLoading(true)
+    const previousActiveId = activeIdRef.current
+    const guestSnapshot = threadsRef.current
+    const guestWithMessages = guestSnapshot.filter(
+      (thread) => thread.messages.length > 0,
+    )
+    const preserveGuest = guestWithMessages.length > 0
+
+    // Avoid blanking an active guest conversation while history loads.
+    if (!preserveGuest) {
+      setHistoryLoading(true)
+    }
+
     void (async () => {
-        try {
-          const listed = await listChatThreads({
+      try {
+        const listed = await listChatThreads({
+          userAddress: ownerAddress,
+        }).unwrap()
+        if (cancelled) return
+
+        const listedIds = new Set(listed.threads.map((thread) => thread.id))
+        const migrated: Thread[] = []
+
+        for (const guest of guestWithMessages) {
+          // Already-persisted threads (e.g. reconnect) are loaded below.
+          if (listedIds.has(guest.id)) {
+            continue
+          }
+
+          const titleFromMessages =
+            guest.messages.find((message) => message.role === 'user')?.content.slice(
+              0,
+              40,
+            ) || 'New chat'
+          const title =
+            guest.title !== 'New chat' ? guest.title : titleFromMessages
+
+          const created = await createChatThread({
             userAddress: ownerAddress,
+            title,
           }).unwrap()
           if (cancelled) return
 
-          if (listed.threads.length === 0) {
-            const created = await createChatThread({
+          const remoteId = created.thread.id
+          threadRemapRef.current.set(guest.id, remoteId)
+
+          let updatedTitle = created.thread.title
+          let updatedAt = formatRelativeTime(created.thread.updatedAt)
+
+          for (const message of guest.messages) {
+            const saved = await appendChatMessage({
+              threadId: remoteId,
               userAddress: ownerAddress,
+              role: message.role,
+              content: message.content,
+              id: isUuid(message.id) ? message.id : undefined,
+              title: updatedTitle,
             }).unwrap()
             if (cancelled) return
-            setThreads([
-              {
-                id: created.thread.id,
-                title: created.thread.title,
-                updatedAt: formatRelativeTime(created.thread.updatedAt),
-                messages: [],
-              },
-            ])
-            setActiveId(created.thread.id)
-            return
+            updatedTitle = saved.thread.title
+            updatedAt = formatRelativeTime(saved.thread.updatedAt)
           }
 
-          const loaded = await Promise.all(
-            listed.threads.map(async (summary) => {
-              const { thread } = await getChatThread({
-                id: summary.id,
-                userAddress: ownerAddress,
-              }).unwrap()
-              return {
-                id: thread.id,
-                title: thread.title,
-                updatedAt: formatRelativeTime(thread.updatedAt),
-                messages: thread.messages.map((message) => ({
-                  id: message.id,
-                  role: message.role,
-                  content: message.content,
-                })),
-              } satisfies Thread
-            }),
-          )
-          if (cancelled) return
-          setThreads(loaded)
-          setActiveId(loaded[0]?.id ?? activeIdRef.current)
-        } catch {
-          // Keep in-memory threads if history API is unavailable.
-        } finally {
-          if (!cancelled) {
-            setHistoryLoading(false)
-          }
+          migrated.push({
+            id: remoteId,
+            title: updatedTitle,
+            updatedAt,
+            messages: guest.messages.map((message) => ({ ...message })),
+          })
         }
-      })()
+
+        if (listed.threads.length === 0 && migrated.length === 0) {
+          const created = await createChatThread({
+            userAddress: ownerAddress,
+          }).unwrap()
+          if (cancelled) return
+          setThreads([
+            {
+              id: created.thread.id,
+              title: created.thread.title,
+              updatedAt: formatRelativeTime(created.thread.updatedAt),
+              messages: [],
+            },
+          ])
+          setActiveId(created.thread.id)
+          return
+        }
+
+        const loaded = await Promise.all(
+          listed.threads.map(async (summary) => {
+            const { thread } = await getChatThread({
+              id: summary.id,
+              userAddress: ownerAddress,
+            }).unwrap()
+            return {
+              id: thread.id,
+              title: thread.title,
+              updatedAt: formatRelativeTime(thread.updatedAt),
+              messages: thread.messages.map((message) => ({
+                id: message.id,
+                role: message.role,
+                content: message.content,
+              })),
+            } satisfies Thread
+          }),
+        )
+        if (cancelled) return
+
+        const combined = [...migrated, ...loaded]
+        setThreads(combined)
+
+        const remappedActive =
+          threadRemapRef.current.get(previousActiveId) ?? previousActiveId
+        const activeStillExists = combined.some(
+          (thread) => thread.id === remappedActive,
+        )
+        setActiveId(
+          activeStillExists
+            ? remappedActive
+            : (migrated[0]?.id ?? loaded[0]?.id ?? remappedActive),
+        )
+      } catch {
+        // Keep in-memory threads if history API is unavailable.
+      } finally {
+        if (!cancelled) {
+          setHistoryLoading(false)
+        }
+      }
+    })()
     return () => {
       cancelled = true
     }
-  }, [ownerAddress, listChatThreads, getChatThread, createChatThread])
+  }, [
+    ownerAddress,
+    listChatThreads,
+    getChatThread,
+    createChatThread,
+    appendChatMessage,
+  ])
 
   useEffect(() => {
     if (!open) {
@@ -328,6 +453,17 @@ export function MeraChatDrawer() {
       window.clearTimeout(id)
     }
   }, [open, consumeDraftPrefill])
+
+  // Keep the composer tall enough for multi-line prompts (capped at max-h-28).
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) {
+      return
+    }
+    el.style.height = 'auto'
+    const maxPx = 7 * 16
+    el.style.height = `${Math.min(el.scrollHeight, maxPx)}px`
+  }, [draft, open, view])
 
   // Autopilot balance checks need live chain holdings — refresh when chat opens.
   useEffect(() => {
@@ -689,9 +825,144 @@ export function MeraChatDrawer() {
       return fromHold && fromHold > 0 ? fromHold : 0
     }
 
+    const planBuysAsset = (sellAsset: string): boolean => {
+      const want = normalizeHoldingSymbol(sellAsset)
+      return buyRules.some(
+        (rule) => normalizeHoldingSymbol(rule.asset) === want,
+      )
+    }
+
+    // Buy-then-TP: fund the position first, then arm sells from refreshed holdings.
+    for (const rule of buyRules) {
+      const payHolding = findSellHolding(liveHoldings, rule.payAsset)
+      if (!payHolding || payHolding.quantity <= 0) {
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: joinChatBlocks([
+            `I can’t fund the buy — no **${rule.payAsset}** in your wallet.`,
+            `I see: ${holdingsSummary(liveHoldings)}. Deposit **${rule.payAsset}** to your wallet, then reply **yes**.`,
+          ]),
+        })
+        return
+      }
+      if (!payHolding.tokenProgram || payHolding.mint === 'native') {
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: 'Buys need an SPL pay asset (usually USDC), not native SOL.',
+        })
+        return
+      }
+
+      const buyPx =
+        rule.type === 'limit_buy' && rule.limitPrice != null && rule.limitPrice > 0
+          ? rule.limitPrice
+          : tokenPrice(rule.asset)
+      const payPx = tokenPrice(rule.payAsset) || (rule.payAsset.toUpperCase() === 'USDC' ? 1 : 0)
+      if (!(buyPx > 0) || !(payPx > 0)) {
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: `I couldn’t price **${rule.asset}** / **${rule.payAsset}** to size the buy escrow. Try again in a moment.`,
+        })
+        return
+      }
+
+      const decimals = Math.min(Math.max(payHolding.decimals, 0), 9)
+      // Lock enough pay tokens for the exact share count (not a floored USDC→shares guess).
+      const sized = payUiForExactBuy({
+        shareCount: rule.value,
+        buyPriceUsd: buyPx,
+        payPriceUsd: payPx,
+        decimals,
+      })
+      const payUiNumber = sized.uiNumber
+      const payUiAmount = sized.uiAmount
+      if (!(payUiNumber > 0) || payUiNumber > payHolding.quantity + 1e-9) {
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: `Not enough **${rule.payAsset}** — need ~${payUiNumber.toFixed(4)} for ${rule.value} ${rule.asset}, you have ${payHolding.quantity}.`,
+        })
+        return
+      }
+
+      try {
+        // Persist the buy rule BEFORE escrow so a DB failure cannot lock USDC.
+        const confirmed = await confirmRule({
+          userAddress: owner,
+          prompt,
+          rule,
+          status: 'active',
+        }).unwrap()
+
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: `Approve in your wallet to lock **${payUiAmount} ${payHolding.asset}** to buy **${rule.value} ${rule.asset}** (${rule.type === 'limit_buy' ? `limit ≤ $${rule.limitPrice}` : 'market'}).`,
+        })
+
+        const depositSignature = await sendHoldingTransfer({
+          client,
+          signer,
+          holding: payHolding,
+          recipient: treasury,
+          uiAmount: payUiAmount,
+        })
+
+        const armed = await armAutopilot({
+          ruleId: confirmed.rule.id,
+          userAddress: owner,
+          sellMint: payHolding.mint,
+          sellAmount: Number(payUiAmount),
+          depositSignature,
+        }).unwrap()
+
+        activated.push(
+          armed.settledNow
+            ? armed.execution?.note ??
+            `Bought ${armed.execution?.buyAmount ?? rule.value} ${rule.asset} now`
+            : `${rule.asset} ${rule.type} armed — ${armed.reason}`,
+        )
+
+        // Refresh balances for take-profit / ladder sells that need the bought asset
+        try {
+          await new Promise((r) => setTimeout(r, 800))
+          const loaded = await dispatch(loadPortfolio(owner)).unwrap()
+          liveHoldings = loaded.holdings
+        } catch {
+          // keep previous
+        }
+      } catch (err) {
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: joinChatBlocks([
+            '**Wallet approval or buy arming failed**',
+            formatChatError(err),
+            activated.length > 0
+              ? `Already activated: ${activated.join('; ')}.`
+              : 'No tokens were locked if you never approved the wallet prompt. Fix the error, then reply **yes** to retry.',
+          ]),
+        })
+        return
+      }
+    }
+
+    const deferredSells: CompiledRule[] = []
+
     for (const rule of sellRules) {
       const holding = findSellHolding(liveHoldings, rule.asset)
       if (!holding || holding.quantity <= 0) {
+        if (planBuysAsset(rule.asset)) {
+          // Buy may still be pending (limit) or Spot hasn't indexed the fill yet.
+          deferredSells.push(rule)
+          activated.push(
+            `${rule.asset} ${rule.type} waiting — reply **yes** once Spot shows ${rule.asset}`,
+          )
+          continue
+        }
         await appendMessage(threadId, {
           id: nextId(),
           role: 'assistant',
@@ -699,7 +970,7 @@ export function MeraChatDrawer() {
             `I still can’t see **${rule.asset}** in the connected wallet.`,
             liveHoldings.length === 0
               ? 'Holdings didn’t load — open **Spot**, confirm your wallet is connected, then reply **yes** again.'
-              : `I see: ${liveHoldings.map((row) => `${row.asset} ${row.quantity}`).join(', ') || 'nothing'}. Deposit **${rule.asset}** to your wallet, then reply **yes**.`,
+              : `I see: ${holdingsSummary(liveHoldings)}. Deposit **${rule.asset}** to your wallet, then reply **yes**.`,
           ]),
         })
         return
@@ -776,118 +1047,6 @@ export function MeraChatDrawer() {
       }
     }
 
-    for (const rule of buyRules) {
-      const payHolding = findSellHolding(liveHoldings, rule.payAsset)
-      if (!payHolding || payHolding.quantity <= 0) {
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: joinChatBlocks([
-            `I can’t fund the buy — no **${rule.payAsset}** in your wallet.`,
-            `I see: ${liveHoldings.map((row) => `${row.asset} ${row.quantity}`).join(', ') || 'nothing'}. Deposit **${rule.payAsset}** to your wallet, then reply **yes**.`,
-          ]),
-        })
-        return
-      }
-      if (!payHolding.tokenProgram || payHolding.mint === 'native') {
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: 'Buys need an SPL pay asset (usually USDC), not native SOL.',
-        })
-        return
-      }
-
-      const buyPx =
-        rule.type === 'limit_buy' && rule.limitPrice != null && rule.limitPrice > 0
-          ? rule.limitPrice
-          : tokenPrice(rule.asset)
-      const payPx = tokenPrice(rule.payAsset) || (rule.payAsset.toUpperCase() === 'USDC' ? 1 : 0)
-      if (!(buyPx > 0) || !(payPx > 0)) {
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: `I couldn’t price **${rule.asset}** / **${rule.payAsset}** to size the buy escrow. Try again in a moment.`,
-        })
-        return
-      }
-
-      const payUsd = rule.value * buyPx
-      const payUiNumber = payUsd / payPx
-      if (!(payUiNumber > 0) || payUiNumber > payHolding.quantity + 1e-9) {
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: `Not enough **${rule.payAsset}** — need ~${payUiNumber.toFixed(4)} for ${rule.value} ${rule.asset}, you have ${payHolding.quantity}.`,
-        })
-        return
-      }
-
-      const decimals = Math.min(Math.max(payHolding.decimals, 0), 9)
-      const payUiAmount = payUiNumber.toFixed(decimals)
-
-      try {
-        // Persist the buy rule BEFORE escrow so a DB failure cannot lock USDC.
-        const confirmed = await confirmRule({
-          userAddress: owner,
-          prompt,
-          rule,
-          status: 'active',
-        }).unwrap()
-
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: `Approve in your wallet to lock **${payUiAmount} ${payHolding.asset}** to buy **${rule.value} ${rule.asset}** (${rule.type === 'limit_buy' ? `limit ≤ $${rule.limitPrice}` : 'market'}).`,
-        })
-
-        const depositSignature = await sendHoldingTransfer({
-          client,
-          signer,
-          holding: payHolding,
-          recipient: treasury,
-          uiAmount: payUiAmount,
-        })
-
-        const armed = await armAutopilot({
-          ruleId: confirmed.rule.id,
-          userAddress: owner,
-          sellMint: payHolding.mint,
-          sellAmount: Number(payUiAmount),
-          depositSignature,
-        }).unwrap()
-
-        activated.push(
-          armed.settledNow
-            ? armed.execution?.note ??
-            `Bought ${armed.execution?.buyAmount ?? rule.value} ${rule.asset} now`
-            : `${rule.asset} ${rule.type} armed — ${armed.reason}`,
-        )
-
-        // Refresh balances for subsequent ladder legs + Spot / portfolio UI
-        try {
-          await new Promise((r) => setTimeout(r, 400))
-          const loaded = await dispatch(loadPortfolio(owner)).unwrap()
-          liveHoldings = loaded.holdings
-        } catch {
-          // keep previous
-        }
-      } catch (err) {
-        await appendMessage(threadId, {
-          id: nextId(),
-          role: 'assistant',
-          content: joinChatBlocks([
-            '**Wallet approval or buy arming failed**',
-            formatChatError(err),
-            activated.length > 0
-              ? `Already activated: ${activated.join('; ')}.`
-              : 'No tokens were locked if you never approved the wallet prompt. Fix the error, then reply **yes** to retry.',
-          ]),
-        })
-        return
-      }
-    }
-
     // Force portfolio + Spot balances to refresh after fills
     try {
       await new Promise((r) => setTimeout(r, 600))
@@ -896,7 +1055,7 @@ export function MeraChatDrawer() {
       void dispatch(loadPortfolio(owner))
     }
     requestPortfolioRefresh()
-    setPendingRules([])
+    setPendingRules(deferredSells)
     await appendMessage(threadId, {
       id: nextId(),
       role: 'assistant',
@@ -904,6 +1063,69 @@ export function MeraChatDrawer() {
         `**Portfolio plan activated** (${activated.length} step${activated.length === 1 ? '' : 's'})`,
         interpretation,
         activated.map((line) => `- ${line}`).join('\n'),
+        deferredSells.length > 0
+          ? `Take-profit / sell still pending until **${[...new Set(deferredSells.map((r) => r.asset))].join(', ')}** shows on Spot — then reply **yes**.`
+          : null,
+      ]),
+    })
+  }
+
+  function clearPendingPlan() {
+    setPendingRules([])
+    setPendingCancelIds([])
+  }
+
+  async function refundAndCancelOrders(
+    threadId: string,
+    owner: string,
+    ruleIds: string[],
+  ) {
+    if (ruleIds.length === 0) {
+      clearPendingPlan()
+      await appendMessage(threadId, {
+        id: nextId(),
+        role: 'assistant',
+        content: 'Okay — I dropped that draft. Nothing was locked.',
+      })
+      return
+    }
+
+    const refunds: string[] = []
+    const failures: string[] = []
+    for (const id of ruleIds) {
+      try {
+        const result = await cancelRule({ id, userAddress: owner }).unwrap()
+        if (result.refunded && result.refundedAmount && result.refundSymbol) {
+          refunds.push(
+            `${result.refundedAmount} ${result.refundSymbol}`,
+          )
+        }
+      } catch (err) {
+        failures.push(formatChatError(err))
+      }
+    }
+
+    try {
+      await dispatch(loadPortfolio(owner)).unwrap()
+    } catch {
+      void dispatch(loadPortfolio(owner))
+    }
+    requestPortfolioRefresh()
+    clearPendingPlan()
+
+    await appendMessage(threadId, {
+      id: nextId(),
+      role: 'assistant',
+      content: joinChatBlocks([
+        refunds.length > 0
+          ? `**Order cancelled.** Returned **${refunds.join(', ')}** to your spendable wallet.`
+          : failures.length === 0
+            ? '**Order cancelled.** Nothing was locked, so your wallet is unchanged.'
+            : '**Couldn’t finish cancelling.**',
+        failures.length > 0 ? failures.join('\n') : null,
+        refunds.length > 0
+          ? 'Those funds are spendable again — they are no longer sitting in Autopilot.'
+          : null,
       ]),
     })
   }
@@ -955,14 +1177,18 @@ export function MeraChatDrawer() {
       const result = await autopilotTurn({
         message: content,
         history,
-        holdings: liveHoldings.map((row) => ({
-          symbol: row.asset,
-          quantity: row.quantity,
-          priceUsd: row.price,
-        })),
+        holdings: liveHoldings
+          .filter((row) => !row.locked)
+          .map((row) => ({
+            symbol: row.asset,
+            quantity: row.quantity,
+            priceUsd: row.price,
+          })),
         walletConnected: Boolean(connected),
+        userAddress: owner,
         pendingRules,
         pendingRule: pendingRules[0] ?? null,
+        pendingCancelIds,
       }).unwrap()
 
       if (!result.ok) {
@@ -974,6 +1200,11 @@ export function MeraChatDrawer() {
         return
       }
 
+      if (result.clearPending) {
+        clearPendingPlan()
+      }
+
+      const cancelIds = result.cancelRuleIds ?? []
       const planRules =
         result.rules && result.rules.length > 0
           ? result.rules
@@ -981,7 +1212,43 @@ export function MeraChatDrawer() {
             ? [result.rule]
             : []
 
+      if (result.kind === 'propose' && cancelIds.length > 0) {
+        setPendingRules([])
+        setPendingCancelIds(cancelIds)
+        await appendMessage(threadId, {
+          id: nextId(),
+          role: 'assistant',
+          content: result.reply,
+        })
+        return
+      }
+
+      if (result.kind === 'cancel') {
+        if (!owner && cancelIds.length > 0) {
+          setPendingCancelIds(cancelIds)
+          await appendMessage(threadId, {
+            id: nextId(),
+            role: 'assistant',
+            content:
+              'Connect a wallet so I can return locked tokens, then say **yes**.',
+          })
+          return
+        }
+        if (cancelIds.length === 0) {
+          clearPendingPlan()
+          await appendMessage(threadId, {
+            id: nextId(),
+            role: 'assistant',
+            content: result.reply,
+          })
+          return
+        }
+        await refundAndCancelOrders(threadId, owner!, cancelIds)
+        return
+      }
+
       if (result.kind === 'propose' && planRules.length > 0) {
+        setPendingCancelIds([])
         setPendingRules(planRules)
         await appendMessage(threadId, {
           id: nextId(),
@@ -991,7 +1258,7 @@ export function MeraChatDrawer() {
             result.interpretation
               ? `**Plan draft (${planRules.length} rule${planRules.length === 1 ? '' : 's'}):** ${result.interpretation}`
               : null,
-            'Reply **yes** to confirm, or tell me what to change.',
+            'Reply **yes** to confirm, or tell me what to change. You can also **cancel** this draft.',
           ]),
         })
         return
@@ -1267,7 +1534,10 @@ export function MeraChatDrawer() {
                       {message.role === 'assistant' ? (
                         <ChatMarkdown content={message.content} />
                       ) : (
-                        message.content
+                        <ChatMarkdown
+                          content={message.content}
+                          className="text-lime-foreground [&_a]:text-lime-foreground [&_blockquote]:border-lime-foreground/40 [&_blockquote]:text-lime-foreground/80 [&_code]:bg-black/10 [&_del]:text-lime-foreground/70 [&_hr]:border-lime-foreground/30 [&_strong]:text-lime-foreground [&_td]:border-lime-foreground/20 [&_th]:text-lime-foreground"
+                        />
                       )}
                     </div>
                   </div>
@@ -1304,7 +1574,7 @@ export function MeraChatDrawer() {
                 }}
                 onKeyDown={onKeyDown}
                 placeholder="Message Mera…"
-                className="max-h-28 min-h-[40px] flex-1 resize-none bg-transparent px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                className="max-h-28 min-h-[40px] flex-1 resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
               <Button
                 type="submit"

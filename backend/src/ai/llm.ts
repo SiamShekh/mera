@@ -27,7 +27,8 @@ export async function resolveLlmForAgent(
 ): Promise<LlmResult> {
   return resolveLlm(env, messages, {
     temperature: options.temperature ?? 0.2,
-    maxTokens: options.maxTokens ?? 700,
+    // Multi-rule portfolio plans need room for a full JSON rules array.
+    maxTokens: options.maxTokens ?? 1600,
     json: options.json ?? true,
   })
 }

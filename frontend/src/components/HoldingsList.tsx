@@ -1,16 +1,17 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowDownLeft, ArrowUpRight, RefreshCw } from 'lucide-react'
+import { ArrowDownLeft, ArrowUpRight, Lock, RefreshCw } from 'lucide-react'
 
 import { PortfolioInsights } from '@/components/PortfolioInsights'
 import { TokenIcon } from '@/components/TokenIcon'
 import { Button } from '@/components/ui/button'
 import { formatMoney, formatPercent, formatQty, formatSol } from '@/lib/format'
+import { PORTFOLIO_REFRESH_EVENT, requestPortfolioRefresh } from '@/lib/portfolioRefresh'
 import { cn } from '@/lib/utils'
-import { useGetPricesQuery } from '@/store/api'
+import { useCancelRuleMutation, useGetPricesQuery } from '@/store/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { loadPortfolio } from '@/store/portfolioSlice'
-import { PORTFOLIO_REFRESH_EVENT } from '@/lib/portfolioRefresh'
+import type { Holding } from '@/types/holding'
 
 type HoldingsListProps = {
   ownerAddress: string
@@ -43,6 +44,15 @@ function ChangeText({ change }: { change: number | null }) {
   )
 }
 
+function LockedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <Lock className="size-2.5" />
+      Locked
+    </span>
+  )
+}
+
 /**
  * Holdings: mobile card rows + desktop full-width table.
  */
@@ -55,6 +65,37 @@ export function HoldingsList({
     (state) => state.portfolio,
   )
   const { data: priceBook } = useGetPricesQuery()
+  const [cancelRule, { isLoading: cancelling }] = useCancelRuleMutation()
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
+  const [cancelError, setCancelError] = useState<string | null>(null)
+
+  async function cancelLockedHolding(row: Holding) {
+    if (!row.ruleId) return
+    const confirmed = window.confirm(
+      `Cancel this Autopilot order and return ${formatQty(row.quantity)} ${row.asset} to your spendable wallet?`,
+    )
+    if (!confirmed) return
+    setCancelError(null)
+    setCancellingId(row.id)
+    try {
+      await cancelRule({ id: row.ruleId, userAddress: ownerAddress }).unwrap()
+      await dispatch(loadPortfolio(ownerAddress))
+      requestPortfolioRefresh()
+    } catch (err) {
+      const message =
+        err && typeof err === 'object' && 'data' in err
+          ? String(
+              (err as { data?: { error?: string; message?: string } }).data
+                ?.error ??
+                (err as { data?: { message?: string } }).data?.message ??
+                'Couldn’t cancel that order.',
+            )
+          : 'Couldn’t cancel that order.'
+      setCancelError(message)
+    } finally {
+      setCancellingId(null)
+    }
+  }
 
   useEffect(() => {
     void dispatch(loadPortfolio(ownerAddress))
@@ -156,7 +197,7 @@ export function HoldingsList({
               {mode === 'spot' ? 'Spot balances' : 'Holdings'}
             </h2>
             <p className="text-sm text-muted-foreground">
-              {holdings.length} asset{holdings.length === 1 ? '' : 's'}
+              {holdings.length} position{holdings.length === 1 ? '' : 's'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -188,6 +229,11 @@ export function HoldingsList({
             {error}
           </p>
         ) : null}
+        {cancelError ? (
+          <p className="px-5 py-3 text-sm text-destructive sm:px-6 lg:px-7">
+            {cancelError}
+          </p>
+        ) : null}
 
         {!loading && !error && holdings.length === 0 ? (
           <p className="px-5 py-6 text-sm text-muted-foreground sm:px-6 lg:px-7">
@@ -200,24 +246,46 @@ export function HoldingsList({
           <ul className="divide-y divide-border lg:hidden">
             {holdings.map((row) => (
               <li
-                key={row.mint}
+                key={row.id}
                 className="flex items-center gap-3 px-5 py-3.5 sm:px-6"
               >
                 <TokenIcon symbol={row.asset} src={row.icon} size="lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-foreground">{row.asset}</p>
+                  <p className="flex flex-wrap items-center gap-1.5 font-semibold text-foreground">
+                    {row.asset}
+                    {row.locked ? <LockedBadge /> : null}
+                  </p>
                   <p className="text-xs text-muted-foreground">
-                    {formatQty(row.quantity)} ·{' '}
-                    {formatPercent(row.priceChange24h)}
+                    {formatQty(row.quantity)}
+                    {row.locked
+                      ? row.ruleId
+                        ? ' · In Autopilot — cancel to unlock'
+                        : ' · In Autopilot'
+                      : ` · ${formatPercent(row.priceChange24h)}`}
                   </p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-sm font-semibold text-foreground">
                     {formatMoney(row.value)}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {row.allocation.toFixed(1)}%
-                  </p>
+                  {row.locked && row.ruleId ? (
+                    <button
+                      type="button"
+                      className="mt-1 text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+                      disabled={cancelling && cancellingId === row.id}
+                      onClick={() => {
+                        void cancelLockedHolding(row)
+                      }}
+                    >
+                      {cancelling && cancellingId === row.id
+                        ? 'Cancelling…'
+                        : 'Cancel'}
+                    </button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {row.allocation.toFixed(1)}%
+                    </p>
+                  )}
                 </div>
               </li>
             ))}
@@ -243,7 +311,7 @@ export function HoldingsList({
               <tbody>
                 {holdings.map((row) => (
                   <tr
-                    key={row.mint}
+                    key={row.id}
                     className="border-b border-border last:border-b-0"
                   >
                     <td className="px-7 py-4">
@@ -254,11 +322,16 @@ export function HoldingsList({
                           size="lg"
                         />
                         <div>
-                          <p className="font-semibold text-foreground">
+                          <p className="flex flex-wrap items-center gap-1.5 font-semibold text-foreground">
                             {row.asset}
+                            {row.locked ? <LockedBadge /> : null}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {formatSol(row.valueInSol)}
+                            {row.locked
+                              ? row.ruleId
+                                ? 'Cancel to return this to your wallet'
+                                : 'Locked until the order fills'
+                              : formatSol(row.valueInSol)}
                           </p>
                         </div>
                       </div>
@@ -272,7 +345,11 @@ export function HoldingsList({
                       <p className="font-semibold text-foreground">
                         {formatMoney(row.price)}
                       </p>
-                      <ChangeText change={row.priceChange24h} />
+                      {row.locked ? (
+                        <p className="text-xs text-muted-foreground">Escrow</p>
+                      ) : (
+                        <ChangeText change={row.priceChange24h} />
+                      )}
                     </td>
                     <td className="px-4 py-4">
                       <p className="font-semibold text-foreground">
@@ -295,12 +372,35 @@ export function HoldingsList({
                       </div>
                     </td>
                     <td className="px-7 py-4 text-right">
-                      <Link
-                        to={tradeUrl()}
-                        className="inline-flex h-9 cursor-pointer items-center rounded-xl bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
-                      >
-                        Trade
-                      </Link>
+                      {row.locked ? (
+                        row.ruleId ? (
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            className="rounded-xl"
+                            disabled={cancelling && cancellingId === row.id}
+                            onClick={() => {
+                              void cancelLockedHolding(row)
+                            }}
+                          >
+                            {cancelling && cancellingId === row.id
+                              ? 'Cancelling…'
+                              : 'Cancel'}
+                          </Button>
+                        ) : (
+                          <span className="inline-flex h-9 items-center text-sm font-medium text-muted-foreground">
+                            Locked
+                          </span>
+                        )
+                      ) : (
+                        <Link
+                          to={tradeUrl()}
+                          className="inline-flex h-9 cursor-pointer items-center rounded-xl bg-secondary px-3 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+                        >
+                          Trade
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}

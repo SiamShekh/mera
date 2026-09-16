@@ -31,6 +31,10 @@ export type Rule = {
   payAsset?: string | null
   limitPrice?: number | null
   status: RuleStatus
+  mint?: string | null
+  escrowSellAmount?: number | null
+  escrowDepositSig?: string | null
+  executedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -173,19 +177,23 @@ export type AutopilotTurnRequest = {
   history?: ChatMessageTurn[]
   holdings?: Array<{ symbol: string; quantity: number; priceUsd: number }>
   walletConnected?: boolean
+  userAddress?: string
   pendingRule?: CompiledRule | null
   pendingRules?: CompiledRule[] | null
+  pendingCancelIds?: string[]
 }
 
 export type AutopilotTurnResult =
   | {
       ok: true
-      kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute'
+      kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute' | 'cancel'
       reply: string
       rule: CompiledRule | null
       rules?: CompiledRule[]
       interpretation: string | null
       provider: 'openai'
+      cancelRuleIds?: string[]
+      clearPending?: boolean
     }
   | { ok: false; error: string }
 
@@ -255,6 +263,26 @@ export type PriceBook = {
     changePct: number
     createdAt: string
   }>
+}
+
+export type LockedLot = {
+  mint: string
+  quantity: number
+  ruleId?: string | null
+}
+
+export type CancelRuleResponse = {
+  ok: true
+  ruleId: string
+  refunded: boolean
+  refundedAmount: number | null
+  refundMint: string | null
+  refundSymbol: string | null
+  refundSignature: string | null
+}
+
+export type LockedHoldingsResponse = {
+  locked: LockedLot[]
 }
 
 export type KeeperTickResponse = {

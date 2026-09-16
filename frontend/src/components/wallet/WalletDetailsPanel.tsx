@@ -10,6 +10,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Lock,
   LogOut,
   X,
 } from 'lucide-react'
@@ -18,7 +19,9 @@ import { Button } from '@/components/ui/button'
 import { TokenIcon } from '@/components/TokenIcon'
 import { XSTOCK_BY_SYMBOL } from '@/data/xstocks'
 import { formatMoney, formatQty, formatSol, shortenAddress } from '@/lib/format'
+import { requestPortfolioRefresh } from '@/lib/portfolioRefresh'
 import type { AppClient } from '@/lib/solanaClient'
+import { useCancelRuleMutation } from '@/store/api'
 import { useAppDispatch, useAppSelector } from '@/store/hooks'
 import { clearPortfolio, loadPortfolio } from '@/store/portfolioSlice'
 
@@ -45,6 +48,8 @@ export function WalletDetailsPanel({
   const { holdings, loading, error } = useAppSelector(
     (state) => state.portfolio,
   )
+  const [cancelRule] = useCancelRuleMutation()
+  const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const [hidden, setHidden] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -247,23 +252,60 @@ export function WalletDetailsPanel({
           <ul className="mt-2 divide-y divide-border">
             {holdings.map((row) => (
               <li
-                key={row.mint}
+                key={row.id}
                 className="flex items-center gap-3 px-5 py-3.5"
               >
                 <TokenIcon symbol={row.asset} src={row.icon} size="lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="inline-flex items-center gap-1 font-semibold text-foreground">
+                  <p className="inline-flex items-center gap-1.5 font-semibold text-foreground">
                     {displayAssetName(row.asset)}
-                    <BadgeCheck className="size-3.5 text-positive" />
+                    {row.locked ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        <Lock className="size-2.5" />
+                        Locked
+                      </span>
+                    ) : (
+                      <BadgeCheck className="size-3.5 text-positive" />
+                    )}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {hidden
                       ? '••••'
-                      : `${formatQty(row.quantity)} ${row.asset}`}
+                      : `${formatQty(row.quantity)} ${row.asset}${row.locked ? ' · In Autopilot' : ''}`}
                   </p>
                 </div>
-                <p className="shrink-0 text-sm font-semibold text-foreground">
-                  {hidden ? '••••' : formatMoney(row.value)}
+                <p className="shrink-0 text-right">
+                  <span className="block text-sm font-semibold text-foreground">
+                    {hidden ? '••••' : formatMoney(row.value)}
+                  </span>
+                  {row.locked && row.ruleId && !hidden ? (
+                    <button
+                      type="button"
+                      className="mt-1 text-xs font-medium text-destructive hover:underline disabled:opacity-50"
+                      disabled={cancellingId === row.id}
+                      onClick={() => {
+                        const confirmed = window.confirm(
+                          `Cancel this Autopilot order and return ${formatQty(row.quantity)} ${row.asset} to your wallet?`,
+                        )
+                        if (!confirmed) return
+                        setCancellingId(row.id)
+                        void cancelRule({
+                          id: row.ruleId!,
+                          userAddress: ownerAddress,
+                        })
+                          .unwrap()
+                          .then(() => {
+                            void dispatch(loadPortfolio(ownerAddress))
+                            requestPortfolioRefresh()
+                          })
+                          .finally(() => {
+                            setCancellingId(null)
+                          })
+                      }}
+                    >
+                      {cancellingId === row.id ? 'Cancelling…' : 'Cancel'}
+                    </button>
+                  ) : null}
                 </p>
               </li>
             ))}

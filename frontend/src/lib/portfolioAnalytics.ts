@@ -36,6 +36,30 @@ export function createSnapshot(
   }
 }
 
+/** Combine wallet + locked lots of the same mint for PnL / concentration. */
+export function aggregateHoldingsByMint(holdings: Holding[]): Holding[] {
+  const byMint = new Map<string, Holding>()
+  for (const row of holdings) {
+    const existing = byMint.get(row.mint)
+    if (!existing) {
+      byMint.set(row.mint, {
+        ...row,
+        id: row.mint,
+        locked: false,
+      })
+      continue
+    }
+    byMint.set(row.mint, {
+      ...existing,
+      quantity: existing.quantity + row.quantity,
+      value: existing.value + row.value,
+      valueInSol: existing.valueInSol + row.valueInSol,
+      allocation: existing.allocation + row.allocation,
+    })
+  }
+  return [...byMint.values()]
+}
+
 /**
  * Compare an old snapshot to the latest holdings.
  * Shows value/quantity/allocation differences per token.
@@ -45,9 +69,13 @@ export function diffPortfolios(
   current: Holding[],
 ): PortfolioDiff {
   const beforeByMint = new Map(
-    snapshot.holdings.map((row) => [row.mint, row] as const),
+    aggregateHoldingsByMint(snapshot.holdings).map(
+      (row) => [row.mint, row] as const,
+    ),
   )
-  const afterByMint = new Map(current.map((row) => [row.mint, row] as const))
+  const afterByMint = new Map(
+    aggregateHoldingsByMint(current).map((row) => [row.mint, row] as const),
+  )
 
   const changed: HoldingDiff[] = []
   const added: Holding[] = []
@@ -99,11 +127,12 @@ export function diffPortfolios(
 
 /** Find the holding with the highest USD value (largest position) */
 export function findLargestPosition(holdings: Holding[]): Holding | null {
-  if (holdings.length === 0) {
+  const aggregated = aggregateHoldingsByMint(holdings)
+  if (aggregated.length === 0) {
     return null
   }
 
-  return holdings.reduce((best, row) => (row.value > best.value ? row : best))
+  return aggregated.reduce((best, row) => (row.value > best.value ? row : best))
 }
 
 /**

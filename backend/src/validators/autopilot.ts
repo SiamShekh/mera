@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { compiledRuleSchema } from './compile'
+import { solanaAddressSchema } from './user'
 
 export const autopilotTurnBodySchema = z.object({
   message: z.string().trim().min(1).max(2000),
@@ -24,8 +25,10 @@ export const autopilotTurnBodySchema = z.object({
     .max(50)
     .optional(),
   walletConnected: z.boolean().optional(),
+  userAddress: solanaAddressSchema.optional(),
   pendingRule: compiledRuleSchema.optional().nullable(),
   pendingRules: z.array(compiledRuleSchema).max(20).optional().nullable(),
+  pendingCancelIds: z.array(z.string().uuid()).max(20).optional(),
 })
 
 export type AutopilotTurnBody = z.infer<typeof autopilotTurnBodySchema>

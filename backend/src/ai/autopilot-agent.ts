@@ -3,7 +3,17 @@ import { z } from 'zod'
 import { extractJsonObject, resolveLlmForAgent } from './llm'
 import { interpretRules } from './interpret'
 import { normalizeAsset } from './assets'
-import { fallbackCompile } from './fallback'
+import { fallbackCompile, fallbackCompileMany, brokerClarifyMessage } from './fallback'
+import {
+  isLiquidateIntent,
+  buildLiquidateRules,
+  runAutopilotWithOpenAIAgents,
+  unclearInstructionReply,
+} from './autopilot-openai-sdk'
+import {
+  resolveCancelTurn,
+  type OpenOrderHint,
+} from './cancel'
 import {
   compiledRuleSchema,
   isBuySideRule,
@@ -14,21 +24,24 @@ import type { Bindings } from '../types/env'
 
 /** Soft shell — rules validated separately so one bad object doesn't kill the turn. */
 const agentOutputSchema = z.object({
-  kind: z.enum(['clarify', 'propose', 'cannot', 'chat', 'execute']),
+  kind: z.enum(['clarify', 'propose', 'cannot', 'chat', 'execute', 'cancel']),
   reply: z.string().min(1),
   rule: z.unknown().optional().nullable(),
   rules: z.array(z.unknown()).max(20).optional().nullable(),
+  cancelRuleIds: z.array(z.string().uuid()).max(20).optional().nullable(),
 })
 
 export type AutopilotAgentResult =
   | {
       ok: true
-      kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute'
+      kind: 'clarify' | 'propose' | 'cannot' | 'chat' | 'execute' | 'cancel'
       reply: string
       rule: CompiledRule | null
       rules: CompiledRule[]
       interpretation: string | null
       provider: 'openai'
+      cancelRuleIds?: string[]
+      clearPending?: boolean
     }
   | { ok: false; error: string }
 
@@ -51,16 +64,62 @@ export async function runAutopilotAgent(
     walletConnected?: boolean
     pendingRule?: CompiledRule | null
     pendingRules?: CompiledRule[] | null
+    pendingCancelIds?: string[]
+    openOrders?: OpenOrderHint[]
   },
 ): Promise<AutopilotAgentResult> {
   const pendingRules = normalizePendingRules(
     input.pendingRules,
     input.pendingRule,
   )
+  const pendingCancelIds = input.pendingCancelIds ?? []
+  const openOrders = input.openOrders ?? []
+
+  const cancelTurn = resolveCancelTurn({
+    message: input.message,
+    pendingRulesCount: pendingRules.length,
+    pendingCancelIds,
+    openOrders,
+  })
+  if (cancelTurn) {
+    return {
+      ok: true,
+      kind: cancelTurn.kind,
+      reply: cancelTurn.reply,
+      rule: null,
+      rules: [],
+      interpretation: null,
+      provider: 'openai',
+      cancelRuleIds: cancelTurn.cancelRuleIds,
+      clearPending: cancelTurn.clearPending,
+    }
+  }
+
+  // Prefer OpenAI Agents SDK (tools + structured output) when a key is present.
+  const apiKey = env.OPENAI_API_KEY?.trim()
+  if (apiKey) {
+    const sdkResult = await runAutopilotWithOpenAIAgents({
+      apiKey,
+      model: env.OPENAI_MODEL,
+      message: input.message,
+      history: input.history,
+      holdings: input.holdings,
+      walletConnected: input.walletConnected,
+      pendingRules,
+      pendingCancelIds,
+      openOrders,
+    })
+    if (sdkResult) {
+      return sdkResult
+    }
+  }
+
   const system = buildAutopilotAgentPrompt({
     holdings: input.holdings,
     walletConnected: input.walletConnected,
     pendingRules,
+    pendingCancelIds,
+    openOrders,
   })
 
   const llm = await resolveLlmForAgent(env, [
@@ -73,7 +132,7 @@ export async function runAutopilotAgent(
   ])
 
   if (!llm.ok) {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: 'openai' }
     }
@@ -81,7 +140,7 @@ export async function runAutopilotAgent(
   }
 
   if (isGarbageModelText(llm.text)) {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: llm.provider }
     }
@@ -96,7 +155,7 @@ export async function runAutopilotAgent(
   try {
     raw = extractJsonObject(llm.text)
   } catch {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: llm.provider }
     }
@@ -113,7 +172,7 @@ export async function runAutopilotAgent(
 
   const parsed = agentOutputSchema.safeParse(raw)
   if (!parsed.success) {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: llm.provider }
     }
@@ -130,7 +189,7 @@ export async function runAutopilotAgent(
   }
 
   if (isGarbageModelText(parsed.data.reply)) {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: llm.provider }
     }
@@ -146,7 +205,10 @@ export async function runAutopilotAgent(
     }
   }
 
-  let rules = coerceRules(parsed.data.rules, parsed.data.rule)
+  let rules = coerceRules(parsed.data.rules, parsed.data.rule, {
+    message: input.message,
+    holdings: input.holdings,
+  })
 
   if (
     (parsed.data.kind === 'propose' || parsed.data.kind === 'execute') &&
@@ -155,8 +217,28 @@ export async function runAutopilotAgent(
     rules = expandLiquidateIfNeeded(rules, input.holdings, input.message)
     rules = expandDiversifyIfNeeded(rules, input.holdings, input.message)
     rules = expandBuyLadderIfNeeded(rules, input.message)
+    rules = expandNotionalAndDipBuysIfNeeded(
+      rules,
+      input.message,
+      input.holdings,
+    )
   } else if (parsed.data.kind !== 'propose' && parsed.data.kind !== 'execute') {
     rules = []
+  }
+
+  // Model returned too few legs for a clearly multi-intent prompt — recover.
+  if (
+    countDistinctIntents(input.message) >= 2 &&
+    rules.length < countDistinctIntents(input.message) &&
+    (parsed.data.kind === 'propose' ||
+      parsed.data.kind === 'clarify' ||
+      parsed.data.kind === 'chat' ||
+      parsed.data.kind === 'cannot')
+  ) {
+    const recovered = proposeFromFallback(input.message, input.holdings)
+    if (recovered && recovered.rules.length > rules.length) {
+      return { ...recovered, provider: llm.provider }
+    }
   }
 
   // Model clarified / failed to emit rules, but the prompt is a clear compileable order.
@@ -167,7 +249,7 @@ export async function runAutopilotAgent(
       parsed.data.kind === 'propose' ||
       parsed.data.kind === 'cannot')
   ) {
-    const deterministic = proposeFromFallback(input.message)
+    const deterministic = proposeFromFallback(input.message, input.holdings)
     if (deterministic) {
       return { ...deterministic, provider: llm.provider }
     }
@@ -239,10 +321,16 @@ export async function runAutopilotAgent(
     ok: true,
     kind: parsed.data.kind,
     reply: parsed.data.reply,
-    rule: rules[0] ?? null,
-    rules,
-    interpretation: rules.length > 0 ? interpretRules(rules) : null,
+    rule: parsed.data.kind === 'cancel' ? null : (rules[0] ?? null),
+    rules: parsed.data.kind === 'cancel' ? [] : rules,
+    interpretation:
+      parsed.data.kind === 'cancel'
+        ? null
+        : rules.length > 0
+          ? interpretRules(rules)
+          : null,
     provider: llm.provider,
+    cancelRuleIds: parsed.data.cancelRuleIds ?? [],
   }
 }
 
@@ -256,7 +344,11 @@ export function normalizePendingRules(
 }
 
 /** Validate / coerce model rule blobs; drop junk instead of failing the turn. */
-function coerceRules(rulesRaw: unknown, ruleRaw: unknown): CompiledRule[] {
+function coerceRules(
+  rulesRaw: unknown,
+  ruleRaw: unknown,
+  context: { message: string; holdings?: HoldingHint[] },
+): CompiledRule[] {
   const blobs: unknown[] = []
   if (Array.isArray(rulesRaw)) {
     blobs.push(...rulesRaw)
@@ -267,18 +359,22 @@ function coerceRules(rulesRaw: unknown, ruleRaw: unknown): CompiledRule[] {
 
   const out: CompiledRule[] = []
   for (const blob of blobs) {
-    const coerced = coerceOneRule(blob)
+    const coerced = coerceOneRule(blob, context)
     if (coerced) out.push(coerced)
   }
   return out
 }
 
-function coerceOneRule(raw: unknown): CompiledRule | null {
-  const direct = compiledRuleSchema.safeParse(raw)
+function coerceOneRule(
+  raw: unknown,
+  context: { message: string; holdings?: HoldingHint[] },
+): CompiledRule | null {
+  const repaired = repairRuleBlob(raw, context)
+  const direct = compiledRuleSchema.safeParse(repaired)
   if (direct.success) return direct.data
 
-  if (!raw || typeof raw !== 'object') return null
-  const row = raw as Record<string, unknown>
+  if (!repaired || typeof repaired !== 'object') return null
+  const row = repaired as Record<string, unknown>
   const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : ''
 
   // Models often invent market_sell / sell_market for "sell now".
@@ -313,16 +409,138 @@ function coerceOneRule(raw: unknown): CompiledRule | null {
   return null
 }
 
-function proposeFromFallback(message: string): {
+/** Fix common model mistakes before Zod (fake tickers, USDC notional buys). */
+function repairRuleBlob(
+  raw: unknown,
+  context: { message: string; holdings?: HoldingHint[] },
+): unknown {
+  if (!raw || typeof raw !== 'object') return raw
+  const row = { ...(raw as Record<string, unknown>) }
+
+  if (typeof row.asset === 'string') {
+    const normalized = normalizeAsset(row.asset)
+    if (normalized) {
+      row.asset = normalized
+    } else {
+      const fromMessage =
+        context.message.match(/nvidi[a-z]*|nvdax|\bnvda\b/i)?.[0] ??
+        context.message.match(/tesla|tslax|\btsla\b/i)?.[0]
+      const repaired = fromMessage ? normalizeAsset(fromMessage) : null
+      if (repaired) row.asset = repaired
+    }
+  }
+
+  const type = typeof row.type === 'string' ? row.type.trim().toLowerCase() : ''
+  if (type === 'market_buy' || type === 'limit_buy') {
+    const notional = Number(
+      row.payNotional ??
+        row.notionalUsd ??
+        row.usdcAmount ??
+        row.spendUsd ??
+        row.budgetUsd,
+    )
+    if (notional > 0) {
+      const asset =
+        typeof row.asset === 'string'
+          ? (normalizeAsset(row.asset) ?? row.asset)
+          : 'NVDAx'
+      const limitPrice =
+        type === 'limit_buy' ? Number(row.limitPrice) : undefined
+      const shares = sharesFromNotionalHint(
+        notional,
+        asset,
+        context.holdings,
+        limitPrice != null && limitPrice > 0 ? limitPrice : undefined,
+      )
+      if (shares != null) {
+        row.value = shares
+        row.unit = 'amount'
+      }
+    }
+    if (!row.payAsset) row.payAsset = 'USDC'
+  }
+
+  if (
+    (type === 'take_profit' || type === 'stop_loss') &&
+    (row.actionValue == null || Number(row.actionValue) <= 0)
+  ) {
+    row.actionUnit = 'percent'
+    row.actionValue = 100
+  }
+
+  return row
+}
+
+function proposeFromFallback(
+  message: string,
+  holdings?: HoldingHint[],
+): {
   ok: true
-  kind: 'propose'
+  kind: 'propose' | 'clarify'
   reply: string
   rule: CompiledRule | null
   rules: CompiledRule[]
   interpretation: string | null
 } | null {
-  const compiled = fallbackCompile(message)
-  if ('rejection' in compiled) return null
+  if (isLiquidateIntent(message)) {
+    const sells = buildLiquidateRules(holdings ?? [])
+    if (sells.length > 0) {
+      return {
+        ok: true,
+        kind: 'propose',
+        reply: `${interpretRules(sells)}\n\nReply **yes** to arm this plan.`,
+        rule: sells[0] ?? null,
+        rules: sells,
+        interpretation: interpretRules(sells),
+      }
+    }
+    return {
+      ok: true,
+      kind: 'clarify',
+      reply:
+        'I can sell your **stocks** into USDC, but I don’t see any non-USDC balances yet. Connect your wallet / refresh Spot, then ask again.',
+      rule: null,
+      rules: [],
+      interpretation: null,
+    }
+  }
+
+  const many = fallbackCompileMany(message, holdings)
+  if (many && many.length > 0) {
+    return {
+      ok: true,
+      kind: 'propose',
+      reply: `${interpretRules(many)}\n\nReply **yes** to arm this plan.`,
+      rule: many[0] ?? null,
+      rules: many,
+      interpretation: interpretRules(many),
+    }
+  }
+
+  const compiled = fallbackCompile(message, holdings)
+  if ('rejection' in compiled) {
+    if (/\b(buy|sell|stock|shares?)\b/i.test(message)) {
+      return {
+        ok: true,
+        kind: 'clarify',
+        reply:
+          brokerClarifyMessage(message, holdings) ??
+          unclearInstructionReply(message),
+        rule: null,
+        rules: [],
+        interpretation: null,
+      }
+    }
+    return null
+  }
+  // Guard: never propose selling USDC for stock→USDC language.
+  if (
+    isSellSideRule(compiled) &&
+    compiled.asset.toUpperCase() === 'USDC' &&
+    /usdc/i.test(message)
+  ) {
+    return null
+  }
   const rules = [compiled]
   return {
     ok: true,
@@ -334,46 +552,93 @@ function proposeFromFallback(message: string): {
   }
 }
 
+function countDistinctIntents(message: string): number {
+  const numbered = [...message.matchAll(/\b\d+[.)]\s+/g)].length
+  if (numbered >= 2) return numbered
+  const buys = (message.toLowerCase().match(/\bbuy\b/g) ?? []).length
+  const sells = (message.toLowerCase().match(/\bsell\b/g) ?? []).length
+  return buys + sells
+}
+
+function sharesFromNotionalHint(
+  usd: number,
+  asset: string,
+  holdings?: HoldingHint[],
+  limitPrice?: number,
+): number | null {
+  const want = asset.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  let px =
+    limitPrice != null && limitPrice > 0 ? limitPrice : null
+  if (!(px != null && px > 0)) {
+    for (const row of holdings ?? []) {
+      const have = (normalizeAsset(row.symbol) ?? row.symbol)
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, '')
+      if (
+        have === want ||
+        (want.includes('NVDA') && have.includes('NVDA'))
+      ) {
+        if (row.priceUsd > 0) {
+          px = row.priceUsd
+          break
+        }
+      }
+    }
+  }
+  if (!(px != null && px > 0)) {
+    const anchors: Record<string, number> = {
+      NVDAX: 120,
+      SOLX: 150,
+      STX: 165,
+      TSLAX: 363.92,
+      AAPLX: 334.71,
+      AMZNX: 253.54,
+    }
+    px = anchors[want] ?? null
+  }
+  if (!(px != null && px > 0) || !(usd > 0)) return null
+  return Number((usd / px).toFixed(6))
+}
+
+/**
+ * Recover USDC-notional market buys and %-dip limit buys when the model
+ * under-emitted legs or emitted share counts that don't match the prompt.
+ */
+function expandNotionalAndDipBuysIfNeeded(
+  rules: CompiledRule[],
+  message: string,
+  holdings?: HoldingHint[],
+): CompiledRule[] {
+  const recovered = fallbackCompileMany(message, holdings)
+  if (!recovered || recovered.length <= rules.length) return rules
+
+  // Prefer recovered plan when it covers more of a multi-intent prompt.
+  const recoveredBuys = recovered.filter(isBuySideRule).length
+  const currentBuys = rules.filter(isBuySideRule).length
+  if (recoveredBuys > currentBuys) return recovered
+  return rules
+}
+
 /** Expand “sell all stocks to USDC” into one market sell per non-USDC holding. */
 function expandLiquidateIfNeeded(
   rules: CompiledRule[],
   holdings: HoldingHint[] | undefined,
   message: string,
 ): CompiledRule[] {
-  const lower = message.toLowerCase()
-  const wantsLiquidate =
-    /(sell|liquidate).*(all|everything).*(stock|token|asset|holding)|sell\s+all\s+(my\s+)?(stocks?|tokens?|assets?).*usdc|convert\s+everything\s+to\s+usdc/i.test(
-      lower,
-    )
-  if (!wantsLiquidate || !holdings || holdings.length === 0) return rules
+  if (!isLiquidateIntent(message)) return rules
 
-  const alreadyMultiMarket =
-    rules.length > 1 &&
-    rules.every(
-      (r) =>
-        r.type === 'take_profit' &&
-        r.unit === 'amount' &&
-        r.value === 0 &&
-        r.actionValue === 100,
-    )
-  if (alreadyMultiMarket) return rules
+  const sells = buildLiquidateRules(holdings ?? [])
+  if (sells.length > 0) return sells
 
-  const sells: CompiledRule[] = []
-  for (const row of holdings) {
-    const symbol = normalizeAsset(row.symbol) ?? row.symbol.toUpperCase()
-    if (symbol === 'USDC' || symbol === 'SOL') continue
-    if (!(row.quantity > 0)) continue
-    sells.push({
-      type: 'take_profit',
-      asset: symbol,
-      unit: 'amount',
-      value: 0,
-      actionUnit: 'percent',
-      actionValue: 100,
-      sellBasis: 'position',
-    })
+  // Never keep a mistaken “sell USDC” rule for liquidate intents.
+  if (
+    rules.length === 1 &&
+    isSellSideRule(rules[0]!) &&
+    rules[0]!.asset.toUpperCase() === 'USDC'
+  ) {
+    return []
   }
-  return sells.length > 0 ? sells : rules
+  return rules
 }
 
 /** Ensure “keep diversified” adds 40% caps for other non-USDC holdings. */
@@ -485,6 +750,19 @@ function expandBuyLadderIfNeeded(
   return ladder.length >= 2 ? ladder : rules
 }
 
+function assetKey(symbol: string): string {
+  return (normalizeAsset(symbol) ?? symbol).toUpperCase().replace(/[^A-Z0-9]/g, '')
+}
+
+function planBuysAsset(rules: CompiledRule[], sellAsset: string): boolean {
+  const sellKey = assetKey(sellAsset)
+  return rules.some((rule) => {
+    if (!isBuySideRule(rule)) return false
+    const buyKey = assetKey(rule.asset)
+    return buyKey === sellKey || symbolsMatchNvidia(buyKey, sellKey)
+  })
+}
+
 function explainMissingBalances(
   rules: CompiledRule[],
   holdings?: HoldingHint[],
@@ -494,6 +772,8 @@ function explainMissingBalances(
 
   const missingSells: string[] = []
   for (const rule of rules.filter(isSellSideRule)) {
+    // Buy-then-TP: companion buy funds the position — don't require sell inventory yet.
+    if (planBuysAsset(rules, rule.asset)) continue
     const want =
       normalizeAsset(rule.asset)?.toUpperCase() ?? rule.asset.toUpperCase()
     const hit = rows.find((row) => {
@@ -504,7 +784,7 @@ function explainMissingBalances(
     if (!hit || !(hit.quantity > 0)) missingSells.push(rule.asset)
   }
   if (missingSells.length > 0) {
-    return `I can’t arm sells for **${missingSells.join(', ')}** yet — your wallet shows no balance. Use **Faucet** on Spot, then reply **yes**.`
+    return `I can’t arm sells for **${missingSells.join(', ')}** yet — your wallet shows no balance. Deposit that stock (or add a buy for it in this plan), then reply **yes**.`
   }
 
   const missingPay: string[] = []
@@ -553,6 +833,8 @@ function buildAutopilotAgentPrompt(context: {
   holdings?: HoldingHint[]
   walletConnected?: boolean
   pendingRules: CompiledRule[]
+  pendingCancelIds: string[]
+  openOrders: OpenOrderHint[]
 }): string {
   const holdings =
     context.holdings && context.holdings.length > 0
@@ -577,6 +859,24 @@ function buildAutopilotAgentPrompt(context: {
       ? `A proposed portfolio plan is waiting for confirmation (${context.pendingRules.length} rule(s)): ${JSON.stringify(context.pendingRules)}. If they affirm (yes/confirm/ok), return kind "execute" with the same rules array.`
       : 'No pending plan awaiting confirmation.'
 
+  const pendingCancel =
+    context.pendingCancelIds.length > 0
+      ? `A cancel is waiting for confirmation. Rule ids: ${context.pendingCancelIds.join(', ')}. If they affirm, return kind "cancel" with the same cancelRuleIds. Do NOT create a new buy/sell.`
+      : 'No pending cancel.'
+
+  const open =
+    context.openOrders.length > 0
+      ? `Open (unfilled) Autopilot orders:\n${context.openOrders
+          .map((order) => {
+            const lock =
+              order.escrowAmount != null && order.escrowAmount > 0
+                ? ` locked ${order.escrowAmount} ${order.payAsset ?? order.asset}`
+                : ' no escrow'
+            return `- id ${order.id}: ${order.type} ${order.asset}${lock}`
+          })
+          .join('\n')}`
+      : 'No open Autopilot orders (nothing to cancel/refund).'
+
   const wallet = context.walletConnected
     ? 'Wallet is connected.'
     : 'Wallet may not be connected.'
@@ -586,43 +886,54 @@ function buildAutopilotAgentPrompt(context: {
       ? `Known non-USDC holdings for diversify defaults: ${nonUsdcHoldings.join(', ')}.`
       : 'If holdings unknown and user says “keep diversified” without %, propose max_allocation 40% for NVDAx only and say they can name more assets.'
 
-  return `You are Mera Autopilot — a programmable portfolio manager.
+  return `You are Mera Autopilot — a programmable portfolio manager for in-app trading only.
 You turn natural language into ONE OR MORE living rules (a plan), then wait for confirmation before anything runs.
+Never write code. Never invent tickers from English filler words (e.g. "I need…" is NOT asset NEED).
+Scope: buys, sells, cash floors, concentration caps, ladders, and dip buys on platform assets. Wallet signatures happen on the client after the user confirms.
 
 Intent families:
 1) Guard (max_allocation) — concentration caps / “keep diversified”
 2) Cash floor (min_allocation, usually USDC) — always keep at least $X cash
 3) Sell orders — take_profit, stop_loss, sell-all stocks → USDC
    Market sell NOW = take_profit with unit "amount" and value 0 (always triggered).
+   If sell size is omitted, default actionValue to 100 (full position). NEVER reuse a buy-dip % as sell size.
 4) Buy orders — market_buy / limit_buy (and ladders of several limit buys)
+   USDC notionals ("buy $2000 of Nvidia with USDC") → convert to share qty using Holdings price (or ~$120 for NVDAx if unknown): value = notional / price.
+   “Buy when price is down 5%” → limit_buy with limitPrice = spot * 0.95 (same notional→shares conversion).
+5) Cancel / delete / unlock — drop a draft OR cancel an OPEN order and refund locked tokens to the spendable wallet.
+   Words: cancel, delete, remove, unlock, refund, put the money back, drop that order/rule/scroll.
+   NEVER compile cancel-talk as a new buy or sell.
+   If they confirm a pending cancel, kind "cancel" with cancelRuleIds (no rules).
 
 Return JSON only (no markdown):
 {
-  "kind": "clarify" | "propose" | "cannot" | "chat" | "execute",
+  "kind": "clarify" | "propose" | "cannot" | "chat" | "execute" | "cancel",
   "reply": "human message to show in chat",
-  "rules": [ /* 1..N compiled rule objects */ ],
-  "rule": null
+  "rules": [ /* 1..N compiled rule objects — include EVERY leg the user asked for */ ],
+  "rule": null,
+  "cancelRuleIds": []
 }
 Prefer "rules". You may also set "rule" as a single-rule alias (client normalizes).
 
 Kinds:
 - clarify — missing critical detail; ask ONE focused question. rules=[]
-- propose — explain the plan in plain English; ask them to reply yes/confirm. Include rules.
+- propose — explain the FULL plan in plain English; ask them to reply yes/confirm. Include ALL rules. For cancel, include cancelRuleIds and empty rules.
 - execute — user confirmed the pending plan. Include the same rules.
+- cancel — user confirmed cancelling open order(s). Include cancelRuleIds. rules=[]
 - cannot — impossible (zero balance when holdings listed, wallet needed, unsupported). rules=[]
 - chat — general Mera question, not a portfolio action. rules=[]
 
 Rule schema:
 - max_allocation | min_allocation | take_profit | stop_loss | market_buy | limit_buy
 - NEVER invent types like market_sell — encode market sells as take_profit value 0.
-- nvidia/NVDA → asset "NVDAx"; tesla/TSLA → "TSLAx"
+- nvidia/NVDA → asset "NVDAx"; tesla/TSLA → "TSLAx"; amazon → "AMZNx"
 - Buys: {"type":"market_buy"|"limit_buy","asset":"NVDAx","unit":"amount","value":<shares>,"payAsset":"USDC","limitPrice":<usd or null>}
 - Sells now: {"type":"take_profit","asset":"TSLAx","unit":"amount","value":0,"actionUnit":"percent","actionValue":100,"sellBasis":"position"}
 - "Buy 5 nvidia" WITHOUT pay asset → clarify: ask what to exchange / pay with, and LIST available balances from Holdings (qty + ~USD). Do NOT invent balances.
 - After pay asset known but price style unknown → clarify: market now OR a fixed/limit USD price?
 - Ladder: "buy 2 at $80, 5 at $100, 8 at $105" → MULTIPLE limit_buy rules (same asset + payAsset). If payAsset missing, ask once then propose the full ladder.
 - Default payAsset to USDC only when user said "with USDC/cash" or clearly implied; otherwise clarify.
-- Sell schema: take_profit / stop_loss (market sell = take_profit amount 0).
+- Numbered multi-step prompts MUST become multiple rules (do not collapse to one sell).
 
 Examples:
 User: "sell 100% of TSLAx"
@@ -645,19 +956,35 @@ User: "market"
 User: "buy 2 nvidia at $80, buy 5 at $100, and buy 8 at $105 with USDC"
 → {"kind":"propose","reply":"I'll set a **buy ladder** with USDC:\n1. 2 NVDAx ≤ $80\n2. 5 NVDAx ≤ $100\n3. 8 NVDAx ≤ $105\nReply **yes** to arm all three.","rules":[{"type":"limit_buy","asset":"NVDAx","unit":"amount","value":2,"payAsset":"USDC","limitPrice":80},{"type":"limit_buy","asset":"NVDAx","unit":"amount","value":5,"payAsset":"USDC","limitPrice":100},{"type":"limit_buy","asset":"NVDAx","unit":"amount","value":8,"payAsset":"USDC","limitPrice":105}]}
 
+User: "I need to take multiple actions: 1. Buy Nvidia using 2000 USDC at market. 2. When price is down 5%, buy another $2000 of Nvidia with USDC. 3. Sell Nvidia when price reaches $125."
+(assume NVDAx spot ~$120)
+→ {"kind":"propose","reply":"Plan:\n1. **Market buy** ~16.6667 NVDAx with **$2000 USDC**\n2. **Limit buy** ~17.5439 NVDAx if price ≤ **$114** (5% dip) with USDC\n3. **Take-profit**: sell **100%** of NVDAx at or above **$125**\nReply **yes** to arm all three.","rules":[{"type":"market_buy","asset":"NVDAx","unit":"amount","value":16.6667,"payAsset":"USDC"},{"type":"limit_buy","asset":"NVDAx","unit":"amount","value":17.5439,"payAsset":"USDC","limitPrice":114},{"type":"take_profit","asset":"NVDAx","unit":"amount","value":125,"actionUnit":"percent","actionValue":100,"sellBasis":"position"}]}
+
 User: "Keep my portfolio diversified, never let Nvidia exceed 40%, and always keep at least $500 USDC"
 → {"kind":"propose","reply":"I'll activate a portfolio plan: **max 40% NVDAx**, diversify caps, and **at least $500 USDC**. Reply **yes**.","rules":[{"type":"max_allocation","asset":"NVDAx","unit":"percent","value":40},{"type":"min_allocation","asset":"USDC","unit":"amount","value":500}]}
 
 User: "Sell if NVDAx drops to $80"
 → {"kind":"propose","reply":"I'll set a **stop-loss**: sell **100% of NVDAx at or below $80**. Reply **yes**.","rules":[{"type":"stop_loss","asset":"NVDAx","unit":"amount","value":80,"actionUnit":"percent","actionValue":100,"sellBasis":"position"}]}
 
+User: "cancel my nvidia order"
+(open order: limit buy NVDAx, locked 600 USDC)
+→ {"kind":"propose","reply":"I'll **cancel** the NVDAx buy and return locked USDC to your wallet. Reply **yes**.","rules":[],"cancelRuleIds":["use-the-real-open-order-id"]}
+
+User: "delete that rule and put the money back"
+(one open order)
+→ {"kind":"propose","reply":"I'll cancel it and refund locked tokens to your spendable wallet. Reply **yes**.","rules":[],"cancelRuleIds":["use-the-real-open-order-id"]}
+
 Rules:
 - Prefer holdings tickers; typos like navidia → NVDAx; tesla → TSLAx.
 - Be concise. Never claim you already bought/sold unless kind is execute (client still must arm).
+- If the user listed N steps, your rules array length should match (unless truly unsupported — then clarify what failed).
+- Cancel always refunds escrow to the spendable wallet; never leave funds locked after a confirmed cancel.
 - Output JSON only.
 
 ${wallet}
 Holdings: ${holdings}
 ${diversifyHint}
-${pending}`
+${open}
+${pending}
+${pendingCancel}`
 }

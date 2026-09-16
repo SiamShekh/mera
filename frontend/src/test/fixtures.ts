@@ -14,5 +14,9 @@ export function makeHolding(
     icon: partial.icon ?? null,
     priceChange24h: partial.priceChange24h ?? null,
     ...partial,
+    id:
+      partial.id ??
+      (partial.locked ? `${partial.mint}:locked` : partial.mint),
+    locked: partial.locked ?? false,
   }
 }

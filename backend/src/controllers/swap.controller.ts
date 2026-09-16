@@ -8,8 +8,9 @@ import {
   loadSwapAuthority,
   payoutBuyTokens,
   quoteSwap,
+  quoteSwapForBuyAmount,
 } from '../solana/mockSwap'
-import { getPriceBook, getPriceMap } from '../solana/priceEngine'
+import { getPriceMap } from '../solana/priceEngine'
 import type { Bindings } from '../types/env'
 import type { SwapCompleteBody, SwapFaucetBody } from '../validators/swap'
 
@@ -47,12 +48,8 @@ export const swapController = {
    * cannot double-credit.
    */
   async complete(env: Bindings, body: SwapCompleteBody) {
-    const book = await getPriceBook()
-    const live: Record<string, number> = {}
-    for (const row of book.prices) {
-      live[row.mint] = row.priceUsd
-      live[row.symbol] = row.priceUsd
-    }
+    // Use the same fresh price map as /config so escrow sizing matches settlement.
+    const live = await getPriceMap(env)
     const tokens = listConfiguredSwapTokens(env, live)
     const sell = tokens.find((t) => t.mint === body.sellMint)
     const buy = tokens.find((t) => t.mint === body.buyMint)
@@ -132,12 +129,48 @@ export const swapController = {
       })
       // Prefer on-chain raw amount so float UI rounding never over-credits.
       const actualSellUi = Number(deposit.rawAmount) / 10 ** sell.decimals
-      quote = quoteSwap({
-        tokens,
-        sellMint: body.sellMint,
-        buyMint: body.buyMint,
-        sellAmount: actualSellUi,
-      })
+
+      const exactBuy = body.exactBuyAmount
+      if (exactBuy && exactBuy > 0) {
+        try {
+          const target = quoteSwapForBuyAmount({
+            tokens,
+            sellMint: body.sellMint,
+            buyMint: body.buyMint,
+            buyAmount: exactBuy,
+          })
+          // Deposit covers exact share cost at live prices → mint exact qty.
+          if (actualSellUi + 1e-9 >= target.sellAmount) {
+            quote = {
+              buyAmount: target.buyAmount,
+              rate: target.rate,
+              sellUsd: actualSellUi * sell.priceUsd,
+              buyUsd: target.buyUsd,
+            }
+          } else {
+            quote = quoteSwap({
+              tokens,
+              sellMint: body.sellMint,
+              buyMint: body.buyMint,
+              sellAmount: actualSellUi,
+            })
+          }
+        } catch {
+          quote = quoteSwap({
+            tokens,
+            sellMint: body.sellMint,
+            buyMint: body.buyMint,
+            sellAmount: actualSellUi,
+          })
+        }
+      } else {
+        quote = quoteSwap({
+          tokens,
+          sellMint: body.sellMint,
+          buyMint: body.buyMint,
+          sellAmount: actualSellUi,
+        })
+      }
       await SwapDeposit.updateOne(
         { signature: body.depositSignature },
         {

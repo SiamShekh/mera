@@ -150,6 +150,7 @@ export async function executeArmedBuy(
     buyMint: buyToken.mint,
     sellAmount: payAmount,
     depositSignature,
+    exactBuyAmount: rule.value,
   })
 
   const paySymbol = rule.payAsset ?? 'USDC'
